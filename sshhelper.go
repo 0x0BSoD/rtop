@@ -43,15 +43,16 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-func getpass(prompt string) (pass string, err error) {
+func getpass(prompt string) (string, error) {
 
 	tstate, err := terminal.GetState(0)
 	if err != nil {
-		return
+		return "", fmt.Errorf("failed to get terminal state: %w", err)
 	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+
 	go func() {
 		quit := false
 		for range sig {
@@ -74,17 +75,15 @@ func getpass(prompt string) (pass string, err error) {
 	f.Flush()
 
 	passbytes, err := terminal.ReadPassword(0)
-	pass = string(passbytes)
 
 	f.Write([]byte("\n"))
 	f.Flush()
 
-	return
+	return string(passbytes), nil
 }
 
 // ref golang.org/x/crypto/ssh/keys.go#ParseRawPrivateKey.
 func ParsePemBlock(block *pem.Block) (interface{}, error) {
-
 	switch block.Type {
 	case "RSA PRIVATE KEY":
 		return x509.ParsePKCS1PrivateKey(block.Bytes)
@@ -93,7 +92,7 @@ func ParsePemBlock(block *pem.Block) (interface{}, error) {
 	case "DSA PRIVATE KEY":
 		return ssh.ParseDSAPrivateKey(block.Bytes)
 	default:
-		return nil, fmt.Errorf("rtop: unsupported key type %q", block.Type)
+		return nil, fmt.Errorf("unsupported key type: %q", block.Type)
 	}
 }
 
@@ -161,15 +160,14 @@ func addKeyAuth(auths []ssh.AuthMethod, keypath string) []ssh.AuthMethod {
 	}
 }
 
-func getAgentAuth() (auth ssh.AuthMethod, ok bool) {
+func getAgentAuth() (bool, ssh.AuthMethod) {
 	if sock := os.Getenv("SSH_AUTH_SOCK"); len(sock) > 0 {
 		if agconn, err := net.Dial("unix", sock); err == nil {
 			ag := agent.NewClient(agconn)
-			auth = ssh.PublicKeysCallback(ag.Signers)
-			ok = true
+			return true, ssh.PublicKeysCallback(ag.Signers)
 		}
 	}
-	return
+	return false, nil
 }
 
 func addPasswordAuth(user, addr string, auths []ssh.AuthMethod) []ssh.AuthMethod {
@@ -187,26 +185,36 @@ func addPasswordAuth(user, addr string, auths []ssh.AuthMethod) []ssh.AuthMethod
 	return append(auths, ssh.PasswordCallback(passwordCallback))
 }
 
-func tryAgentConnect(user, addr string) (client *ssh.Client) {
-	if auth, ok := getAgentAuth(); ok {
-		config := &ssh.ClientConfig{
-			User: user,
-			Auth: []ssh.AuthMethod{auth},
-			HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error {
-				return nil
-			},
-		}
-		client, _ = ssh.Dial("tcp", addr, config)
+func tryAgentConnect(user, addr string) (*ssh.Client, error) {
+	ok, auth := getAgentAuth()
+	if !ok {
+		return nil, nil
 	}
 
-	return
+	config := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{auth},
+		// dummy check
+		HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error {
+			return nil
+		},
+	}
+
+	client, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to SSH: %w", err)
+	}
+	return client, nil
 }
 
-func sshConnect(user, addr, keypath string) (client *ssh.Client) {
+func sshConnect(user, addr, keypath string) (*ssh.Client, error) {
 	// try connecting via agent first
-	client = tryAgentConnect(user, addr)
+	client, err := tryAgentConnect(user, addr)
+	if err != nil {
+		return nil, fmt.Errorf("filed to use agent: %w", err)
+	}
 	if client != nil {
-		return
+		return client, nil
 	}
 
 	// if that failed try with the key and password methods
@@ -221,31 +229,27 @@ func sshConnect(user, addr, keypath string) (client *ssh.Client) {
 			return nil
 		},
 	}
-	client, err := ssh.Dial("tcp", addr, config)
+
+	client, err = ssh.Dial("tcp", addr, config)
 	if err != nil {
 		log.Print(err)
 		os.Exit(1)
 	}
 
-	return
+	return client, nil
 }
 
-func runCommand(client *ssh.Client, command string) (stdout string, err error) {
+func runCommand(client *ssh.Client, command string) (string, error) {
 	session, err := client.NewSession()
 	if err != nil {
-		//log.Print(err)
-		return
+		return "", fmt.Errorf("failed to create SSH session: %w", err)
 	}
 	defer session.Close()
 
 	var buf bytes.Buffer
 	session.Stdout = &buf
-	err = session.Run(command)
-	if err != nil {
-		//log.Print(err)
-		return
+	if err := session.Run(command); err != nil {
+		return "", fmt.Errorf("failed to run command '%s': %w", command, err)
 	}
-	stdout = string(buf.Bytes())
-
-	return
+	return buf.String(), nil
 }

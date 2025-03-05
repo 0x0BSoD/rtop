@@ -232,7 +232,11 @@ func main() {
 	// log.Printf("interval: %v", interval)
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	client := sshConnect(username, addr, key)
+	client, err := sshConnect(username, addr, key)
+	if err != nil {
+		fmt.Printf("ssh connect error: %v\n", err)
+		os.Exit(2)
+	}
 	validateOS(client)
 
 	output := getOutput()
