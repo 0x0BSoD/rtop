@@ -59,7 +59,7 @@ Usage: rtop [-i private-key-file] [-l log-level] [-L log-file] [user@]host[:port
 	-i private-key-file
 		Encoded private key file to use (default: ~/.ssh/id_*  if present)
 	-l log-level
-		Set logging level (DEBUG, INFO, WARN, ERROR, FATAL) (default: INFO)
+		Set logging level (DEBUG, INFO, WARN, ERROR, FATAL) (default: FATAL)
 	-L log-file
 		File to write logs to (default: stderr only)
 	[user@]host[:port]
@@ -120,7 +120,7 @@ func parseCmdLine() (host string, port int, user, key string, interval time.Dura
 
 	// Set default log level
 	if len(argLogLevel) == 0 {
-		logLevel = "INFO"
+		logLevel = "FATAL"
 	} else {
 		logLevel = argLogLevel
 	}
