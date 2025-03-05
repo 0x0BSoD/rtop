@@ -36,6 +36,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -198,8 +199,33 @@ func tryAgentConnect(user, addr string) (*ssh.Client, error) {
 	return client, nil
 }
 
-func sshConnect(user, addr, keypath string) (*ssh.Client, error) {
-	// try connecting via agent first
+func addDefaultKeys(auths []ssh.AuthMethod) []ssh.AuthMethod {
+	homeDir := "~"
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Print(err)
+		// Try to use just ~
+	}
+	defaultKeys := []string{
+		filepath.Join(homeDir, "/.ssh/id_rsa"),
+		filepath.Join(homeDir, "/.ssh/id_ecdsa"),
+		filepath.Join(homeDir, "/.ssh/id_ed25519"),
+		filepath.Join(homeDir, "/.ssh/id_dsa"),
+	}
+
+	for _, key := range defaultKeys {
+		if _, err := os.Stat(key); err == nil {
+			auths = addKeyAuth(auths, key)
+		}
+	}
+
+	return auths
+}
+
+func sshConnect(user, addr, keyPath string) (*ssh.Client, error) {
+	auths := make([]ssh.AuthMethod, 0)
+
+	// Try connecting via agent first
 	client, err := tryAgentConnect(user, addr)
 	if err != nil {
 		return nil, fmt.Errorf("filed to use agent: %w", err)
@@ -208,9 +234,12 @@ func sshConnect(user, addr, keypath string) (*ssh.Client, error) {
 		return client, nil
 	}
 
-	// if that failed try with the key and password methods
-	auths := make([]ssh.AuthMethod, 0, 2)
-	auths = addKeyAuth(auths, keypath)
+	// If that failed try with the key and password methods
+	if len(keyPath) > 0 {
+		auths = addKeyAuth(auths, keyPath) // User-specified key
+	} else {
+		auths = addDefaultKeys(auths) // Check ~/.ssh/id_* files
+	}
 	auths = addPasswordAuth(user, addr, auths)
 
 	config := &ssh.ClientConfig{
