@@ -20,7 +20,7 @@ and screenshots!*
 `rtop` is written in [go](http://golang.org/), and requires Go version 1.2
 or higher. To build, `go get` it:
 
-    go install github.com/rapidloop/rtop@latest
+    go install github.com/0x0BSoD/rtop@latest
 
 You should find the binary `rtop` under `$GOPATH/bin` when the command
 completes. There are no runtime dependencies or configuration needed.

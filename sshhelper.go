@@ -223,11 +223,13 @@ func addDefaultKeys(auths []ssh.AuthMethod) []ssh.AuthMethod {
 }
 
 func sshConnect(user, addr, keyPath string) (*ssh.Client, error) {
+	Info("Establishing SSH connection to %s@%s", user, addr)
 	auths := make([]ssh.AuthMethod, 0)
 
 	// Try connecting via agent first
 	client, err := tryAgentConnect(user, addr)
 	if err != nil {
+		Error("SSH connection with agent failed: %v", err)
 		return nil, fmt.Errorf("filed to use agent: %w", err)
 	}
 	if client != nil {
@@ -256,20 +258,29 @@ func sshConnect(user, addr, keyPath string) (*ssh.Client, error) {
 		os.Exit(1)
 	}
 
+	Info("SSH connection established successfully")
 	return client, nil
 }
 
 func runCommand(client *ssh.Client, command string) (string, error) {
+	Debug("Creating new SSH session")
 	session, err := client.NewSession()
 	if err != nil {
+		Error("Failed to create SSH session: %v", err)
 		return "", fmt.Errorf("failed to create SSH session: %w", err)
 	}
 	defer session.Close()
+	Debug("SSH session created successfully")
 
+	Debug("Executing command: %s", command)
 	var buf bytes.Buffer
 	session.Stdout = &buf
 	if err := session.Run(command); err != nil {
+		Error("Command execution failed: %s - %v", command, err)
 		return "", fmt.Errorf("failed to run command '%s': %w", command, err)
 	}
-	return buf.String(), nil
+
+	output := buf.String()
+	Debug("Command executed successfully, output length: %d bytes", len(output))
+	return output, nil
 }
