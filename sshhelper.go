@@ -31,7 +31,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -55,7 +54,7 @@ func getpass(prompt string) (pass string, err error) {
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
 		quit := false
-		for _ = range sig {
+		for range sig {
 			quit = true
 			break
 		}
@@ -107,6 +106,7 @@ func expandPath(path string) string {
 	return strings.Replace(path, "~", currentUser.HomeDir, 1)
 }
 
+// TODO: PEM is deprecated, will remove it
 func addKeyAuth(auths []ssh.AuthMethod, keypath string) []ssh.AuthMethod {
 	if len(keypath) == 0 {
 		return auths
@@ -115,7 +115,7 @@ func addKeyAuth(auths []ssh.AuthMethod, keypath string) []ssh.AuthMethod {
 	keypath = expandPath(keypath)
 
 	// read the file
-	pemBytes, err := ioutil.ReadFile(keypath)
+	pemBytes, err := os.ReadFile(keypath)
 	if err != nil {
 		log.Print(err)
 		os.Exit(1)

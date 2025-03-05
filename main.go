@@ -157,6 +157,21 @@ func parseCmdLine() (host string, port int, user, key string, interval time.Dura
 	return
 }
 
+// validateOS - rtop only support for Linux system
+func validateOS(client *ssh.Client) {
+	ostype, err := runCommand(client, "uname")
+	if err != nil {
+		os.Exit(1)
+	}
+	//remove newline character
+	ostype = strings.Trim(ostype, "\n")
+
+	if !strings.EqualFold(ostype, "Linux") {
+		fmt.Println("\nrtop not support for ", ostype, "system")
+		os.Exit(1)
+	}
+}
+
 //----------------------------------------------------------------------------
 
 func main() {
@@ -218,6 +233,7 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	client := sshConnect(username, addr, key)
+	validateOS(client)
 
 	output := getOutput()
 	// the loop
