@@ -30,6 +30,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -105,7 +106,6 @@ func expandPath(path string) string {
 	return strings.Replace(path, "~", currentUser.HomeDir, 1)
 }
 
-// TODO: PEM is deprecated, will remove it
 func addKeyAuth(auths []ssh.AuthMethod, keypath string) []ssh.AuthMethod {
 	if len(keypath) == 0 {
 		return auths
@@ -120,44 +120,35 @@ func addKeyAuth(auths []ssh.AuthMethod, keypath string) []ssh.AuthMethod {
 		os.Exit(1)
 	}
 
-	// get first pem block
-	block, _ := pem.Decode(pemBytes)
-	if block == nil {
-		log.Printf("no key found in %s", keypath)
-		return auths
+	// Attempt to parse as an unencrypted private key
+	signer, err := ssh.ParsePrivateKey(pemBytes)
+	if err == nil {
+		return append(auths, ssh.PublicKeys(signer))
 	}
 
-	// handle plain and encrypted keyfiles
-	if x509.IsEncryptedPEMBlock(block) {
+	// If parsing fails, assume the key is encrypted and request a passphrase
+	var passphraseMissingError *ssh.PassphraseMissingError
+	if errors.As(err, &passphraseMissingError) {
 		prompt := fmt.Sprintf("Enter passphrase for key '%s': ", keypath)
-		pass, err := getpass(prompt)
+		passphrase, err := getpass(prompt)
 		if err != nil {
+			log.Printf("failed to get passphrase: %v", err)
 			return auths
 		}
-		block.Bytes, err = x509.DecryptPEMBlock(block, []byte(pass))
+
+		// Try parsing the key with the passphrase
+		signer, err = ssh.ParsePrivateKeyWithPassphrase(pemBytes, []byte(passphrase))
 		if err != nil {
-			log.Print(err)
+			log.Printf("failed to decrypt private key: %v", err)
 			return auths
 		}
-		key, err := ParsePemBlock(block)
-		if err != nil {
-			log.Print(err)
-			return auths
-		}
-		signer, err := ssh.NewSignerFromKey(key)
-		if err != nil {
-			log.Print(err)
-			return auths
-		}
+
 		return append(auths, ssh.PublicKeys(signer))
-	} else {
-		signer, err := ssh.ParsePrivateKey(pemBytes)
-		if err != nil {
-			log.Print(err)
-			return auths
-		}
-		return append(auths, ssh.PublicKeys(signer))
+
 	}
+
+	log.Printf("invalid private key file: %v", err)
+	return auths
 }
 
 func getAgentAuth() (bool, ssh.AuthMethod) {
