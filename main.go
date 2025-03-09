@@ -282,10 +282,23 @@ func main() {
 
 	Info("Starting monitoring loop with refresh interval of %v", interval)
 
+	// Initialize progress bars
+	progressBars := make(map[string]progress.Model, 10)
+	progressBars["total"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["system"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["user"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["idle"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["irq"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["softIrq"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["iowait"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["guest"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["nice"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["steal"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+
 	m := guiModel{
 		client:         client,
 		updateInterval: interval,
-		prog:           progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C")),
+		bars:           progressBars,
 	}
 	getAllStats(m.client, &m.stats)
 

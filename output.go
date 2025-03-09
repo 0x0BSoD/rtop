@@ -13,6 +13,9 @@ import (
 var (
 	keywordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("204")).Background(lipgloss.Color("235"))
 	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	groupStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Padding(1).Width(60)
+	labelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("168"))
+	valueStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 )
 
 type tickMsg time.Time
@@ -23,7 +26,30 @@ type guiModel struct {
 	stats          Stats
 	width          int
 	height         int
-	prog           progress.Model
+	bars           map[string]progress.Model
+}
+
+func resizeBars(bars map[string]progress.Model, width int) {
+	for _, bar := range bars {
+		bar.Width = width - 2*2 - 4
+		if bar.Width > 80 {
+			bar.Width = 80
+		}
+	}
+}
+
+func formatDurationWithDays(d time.Duration) string {
+	days := d / (24 * time.Hour)
+	d %= 24 * time.Hour
+
+	h := d / time.Hour
+	m := (d % time.Hour) / time.Minute
+	s := (d % time.Minute) / time.Second
+
+	if days > 0 {
+		return fmt.Sprintf("%dd %02d:%02d:%02d", days, h, m, s)
+	}
+	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
 
 func (m guiModel) Init() tea.Cmd {
@@ -51,17 +77,16 @@ func (m guiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.prog.Width = msg.Width - 2*2 - 4
-		if m.prog.Width > 80 {
-			m.prog.Width = 80
-		}
+		resizeBars(m.bars, m.width)
 	}
 
 	return m, nil
 }
 
 func (m guiModel) View() string {
-	var out string
+	var outHeader string
+	var outCpu string
+	var outMem string
 
 	horizontalPadding := 4
 	verticalPadding := 2
@@ -69,22 +94,112 @@ func (m guiModel) View() string {
 	contentWidth := m.width - (horizontalPadding * 2)
 	contentHeight := m.height - (verticalPadding * 2)
 
-	out += fmt.Sprintf("%s %s", keywordStyle.Render("HostName"), m.stats.Hostname)
-	out += fmt.Sprintf(" %s %s %s\n\n", keywordStyle.Render("Uptime"), m.stats.Uptime, helpStyle.Render(" (hh:mm:ss)"))
-	out += fmt.Sprintf("%s %s %s %s\n", keywordStyle.Render("Load Average"), m.stats.Load1, m.stats.Load5, m.stats.Load10)
+	// Header ---
+	outHeader += fmt.Sprintf("%s %s ", keywordStyle.Render("HostName"), m.stats.Hostname)
+	outHeader += fmt.Sprintf("%s %s %s %s ", keywordStyle.Render("Load Average"), m.stats.Load1, m.stats.Load5, m.stats.Load10)
+	outHeader += fmt.Sprintf("%s %s\n", keywordStyle.Render("Uptime"), formatDurationWithDays(m.stats.Uptime))
+	outHeader += fmt.Sprintf("%s %s running of %s total\n\n", keywordStyle.Render("Processes"), m.stats.RunningProcs, m.stats.TotalProcs)
 
+	// CPU ---
+	// system
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "System")),
+		m.bars["system"].ViewAs(float64(m.stats.CPU.System)/100.0),
+	)
+	// user
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "User")),
+		m.bars["user"].ViewAs(float64(m.stats.CPU.User)/100.0),
+	)
+	// irq
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Irq")),
+		m.bars["irq"].ViewAs(float64(m.stats.CPU.Irq)/100.0),
+	)
+	// softIrq
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "SoftIrq")),
+		m.bars["softIrq"].ViewAs(float64(m.stats.CPU.SoftIrq)/100.0),
+	)
+	// iowait
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Iowait")),
+		m.bars["iowait"].ViewAs(float64(m.stats.CPU.Iowait)/100.0),
+	)
+	// guest
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Guest")),
+		m.bars["guest"].ViewAs(float64(m.stats.CPU.Guest)/100.0),
+	)
+	// nice
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Nice")),
+		m.bars["nice"].ViewAs(float64(m.stats.CPU.Nice)/100.0),
+	)
+	// steal
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Steal")),
+		m.bars["idle"].ViewAs(float64(m.stats.CPU.Steal)/100.0),
+	)
+	// idle
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Idle")),
+		m.bars["idle"].ViewAs(float64(m.stats.CPU.Idle)/100.0),
+	)
+	// total
 	cpuLoad := 100.0 - m.stats.CPU.Idle
-	out += fmt.Sprintf("%s ", keywordStyle.Render("CPU"))
+	outCpu += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Total")),
+		m.bars["total"].ViewAs(float64(cpuLoad)/100.0),
+	)
 
-	out += m.prog.ViewAs(float64(cpuLoad) / 100.0)
+	cpuGroup := groupStyle.Render(
+		lipgloss.JoinVertical(lipgloss.Left,
+			"CPU",
+			outCpu,
+		),
+	)
 
-	styledContent := lipgloss.NewStyle().
+	// Memory ---
+	// free
+	outMem += fmt.Sprintf("%s %6d\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Free")),
+		m.stats.MemFree)
+	// used
+	outMem += fmt.Sprintf("%s %6d\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Used")),
+		m.stats.MemTotal-m.stats.MemFree)
+	// buffers
+	outMem += fmt.Sprintf("%s %6d\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Buffers")),
+		m.stats.MemBuffers)
+	// cached
+	outMem += fmt.Sprintf("%s %6d\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Cached")),
+		m.stats.MemCached)
+	// swap
+	outMem += fmt.Sprintf("%s %6d\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Swap")),
+		m.stats.SwapTotal-m.stats.SwapFree)
+
+	memGroup := groupStyle.Render(
+		lipgloss.JoinVertical(lipgloss.Left,
+			"Memory",
+			outMem,
+		),
+	)
+
+	out := outHeader +
+		cpuGroup +
+		"\n" +
+		memGroup +
+		fmt.Sprintf("\n\n%s", helpStyle.Render("Press q or ESC to quit"))
+
+	mainSection := lipgloss.NewStyle().
 		Width(contentWidth).
 		Height(contentHeight).
 		Padding(verticalPadding, horizontalPadding).
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
 		Render(out)
 
-	return styledContent
+	return mainSection
 }
