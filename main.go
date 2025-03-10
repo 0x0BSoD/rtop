@@ -301,7 +301,8 @@ func main() {
 		bars:           progressBars,
 	}
 	getAllStats(m.client, &m.stats)
-
+	initFsTable(&m)
+	initNetTable(&m)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
