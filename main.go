@@ -27,15 +27,14 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"github.com/charmbracelet/bubbles/progress"
+	tea "github.com/charmbracelet/bubbletea"
+	"log"
 	"os"
-	"os/signal"
 	"os/user"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -43,8 +42,6 @@ import (
 
 const VERSION = "1.0"
 const DEFAULT_REFRESH = 5 // default refresh interval in seconds
-
-var currentUser *user.User
 
 //----------------------------------------------------------------------------
 // Command-line processing
@@ -212,8 +209,7 @@ func main() {
 		host, port, username, key, interval)
 
 	// get current user
-	var err error
-	currentUser, err = user.Current()
+	currentUser, err := user.Current()
 	if err != nil {
 		Fatal("Failed to get current user: %v", err)
 		return
@@ -284,24 +280,32 @@ func main() {
 
 	validateOS(client)
 
-	output := getOutput()
-	// the loop
 	Info("Starting monitoring loop with refresh interval of %v", interval)
-	showStats(output, client)
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	timer := time.Tick(interval)
-	done := false
-	for !done {
-		select {
-		case s := <-sig:
-			Info("Received signal %v, shutting down", s)
-			done = true
-			fmt.Println()
-		case <-timer:
-			Debug("Refreshing statistics")
-			showStats(output, client)
-		}
+
+	// Initialize progress bars
+	progressBars := make(map[string]progress.Model, 10)
+	progressBars["total"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["system"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["user"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["idle"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["irq"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["softIrq"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["iowait"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["guest"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["nice"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	progressBars["steal"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+
+	m := guiModel{
+		client:         client,
+		updateInterval: interval,
+		bars:           progressBars,
+	}
+	getAllStats(m.client, &m.stats)
+	initFsTable(&m)
+	initNetTable(&m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
 	}
 
 	Info("rtop shutting down")
@@ -310,107 +314,3 @@ func main() {
 		rtopLogger.Close()
 	}
 }
-
-func showStats(output io.Writer, client *ssh.Client) {
-	stats := Stats{}
-
-	Debug("Collecting system statistics")
-	getAllStats(client, &stats)
-
-	// Log summary of collected stats
-	used := stats.MemTotal - stats.MemFree - stats.MemBuffers - stats.MemCached
-	memUsedPercent := float64(used) / float64(stats.MemTotal) * 100
-	cpuIdlePercent := stats.CPU.Idle
-	rtopLogger.LogStats(stats.Hostname, stats.Load1, memUsedPercent, float64(cpuIdlePercent))
-
-	clearConsole()
-	used = stats.MemTotal - stats.MemFree - stats.MemBuffers - stats.MemCached
-	fmt.Fprintf(output,
-		`%s%s%s%s up %s%s%s
-
-Load:
-    %s%s %s %s%s
-
-CPU:
-    %s%.2f%s%% user, %s%.2f%s%% sys, %s%.2f%s%% nice, %s%.2f%s%% idle, %s%.2f%s%% iowait, %s%.2f%s%% hardirq, %s%.2f%s%% softirq, %s%.2f%s%% guest
-
-Processes:
-    %s%s%s running of %s%s%s total
-
-Memory:
-    free    = %s%s%s
-    used    = %s%s%s
-    buffers = %s%s%s
-    cached  = %s%s%s
-    swap    = %s%s%s free of %s%s%s
-
-`,
-		escClear,
-		escBrightWhite, stats.Hostname, escReset,
-		escBrightWhite, fmtUptime(&stats), escReset,
-		escBrightWhite, stats.Load1, stats.Load5, stats.Load10, escReset,
-		escBrightWhite, stats.CPU.User, escReset,
-		escBrightWhite, stats.CPU.System, escReset,
-		escBrightWhite, stats.CPU.Nice, escReset,
-		escBrightWhite, stats.CPU.Idle, escReset,
-		escBrightWhite, stats.CPU.Iowait, escReset,
-		escBrightWhite, stats.CPU.Irq, escReset,
-		escBrightWhite, stats.CPU.SoftIrq, escReset,
-		escBrightWhite, stats.CPU.Guest, escReset,
-		escBrightWhite, stats.RunningProcs, escReset,
-		escBrightWhite, stats.TotalProcs, escReset,
-		escBrightWhite, fmtBytes(stats.MemFree), escReset,
-		escBrightWhite, fmtBytes(used), escReset,
-		escBrightWhite, fmtBytes(stats.MemBuffers), escReset,
-		escBrightWhite, fmtBytes(stats.MemCached), escReset,
-		escBrightWhite, fmtBytes(stats.SwapFree), escReset,
-		escBrightWhite, fmtBytes(stats.SwapTotal), escReset,
-	)
-	if len(stats.FSInfos) > 0 {
-		fmt.Println("Filesystems:")
-		for _, fs := range stats.FSInfos {
-			fmt.Fprintf(output, "%s%28s%s    %s%8s%s: %s%s%s free of %s%s%s\n",
-				escBrightWhite, fs.Device, escReset,
-				escBrightWhite, fs.MountPoint, escReset,
-				escBrightWhite, fmtBytes(fs.Free), escReset,
-				escBrightWhite, fmtBytes(fs.Used+fs.Free), escReset,
-			)
-		}
-		fmt.Println()
-	}
-	if len(stats.NetIntf) > 0 {
-		fmt.Println("Network Interfaces:")
-		keys := make([]string, 0, len(stats.NetIntf))
-		for intf := range stats.NetIntf {
-			keys = append(keys, intf)
-		}
-		sort.Strings(keys)
-		for _, intf := range keys {
-			info := stats.NetIntf[intf]
-			fmt.Fprintf(output, "    %s%s%s - %s%s%s",
-				escBrightWhite, intf, escReset,
-				escBrightWhite, info.IPv4, escReset,
-			)
-			if len(info.IPv6) > 0 {
-				fmt.Fprintf(output, ", %s%s%s\n",
-					escBrightWhite, info.IPv6, escReset,
-				)
-			} else {
-				fmt.Fprintf(output, "\n")
-			}
-			fmt.Fprintf(output, "      rx = %s%s%s, tx = %s%s%s\n",
-				escBrightWhite, fmtBytes(info.Rx), escReset,
-				escBrightWhite, fmtBytes(info.Tx), escReset,
-			)
-			fmt.Println()
-		}
-		fmt.Println()
-	}
-}
-
-const (
-	escClear       = "\033[H\033[2J"
-	escRed         = "\033[31m"
-	escReset       = "\033[0m"
-	escBrightWhite = "\033[37;1m"
-)
