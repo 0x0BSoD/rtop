@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/crypto/ssh"
 	"time"
@@ -11,11 +12,11 @@ import (
 )
 
 var (
-	keywordStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("204")).Background(lipgloss.Color("235"))
-	helpStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	groupStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Padding(1).Width(60)
-	labelStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("168"))
-	valueStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	keywordStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("204")).Background(lipgloss.Color("235"))
+	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	groupStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("63")).Padding(1).Width(60)
+	bigGroupStyle = lipgloss.NewStyle().Padding(0).Width(130)
+	labelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("168"))
 )
 
 type tickMsg time.Time
@@ -27,6 +28,8 @@ type guiModel struct {
 	width          int
 	height         int
 	bars           map[string]progress.Model
+	fsTable        table.Model
+	netTable       table.Model
 }
 
 func resizeBars(bars map[string]progress.Model, width int) {
@@ -67,11 +70,88 @@ func formatBytes(bytes uint64) string {
 	return fmt.Sprintf("%.2f %cb", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+func initFsTable(m *guiModel) {
+	columns := []table.Column{
+		{Title: "Device", Width: 30},
+		{Title: "Mount", Width: 15},
+		{Title: "Free", Width: 10},
+		{Title: "Total", Width: 10},
+	}
+
+	rows := make([]table.Row, 0, len(m.stats.FSInfos))
+	for _, d := range m.stats.FSInfos {
+		rows = append(rows, table.Row{
+			d.Device, d.MountPoint, formatBytes(d.Free), formatBytes(d.Used + d.Free),
+		})
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(false),
+		table.WithHeight(10),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(true)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.NoColor{}).
+		Background(lipgloss.NoColor{}).
+		Bold(false)
+	t.SetStyles(s)
+
+	m.fsTable = t
+}
+
+func initNetTable(m *guiModel) {
+	columns := []table.Column{
+		{Title: "Name", Width: 15},
+		{Title: "IPv4", Width: 17},
+		{Title: "IPv6", Width: 30},
+		{Title: "RX", Width: 10},
+		{Title: "TX", Width: 10},
+	}
+
+	rows := make([]table.Row, 0, len(m.stats.FSInfos))
+	for n, d := range m.stats.NetIntf {
+		rows = append(rows, table.Row{
+			n, d.IPv4, d.IPv6, formatBytes(d.Rx), formatBytes(d.Tx),
+		})
+	}
+
+	t := table.New(
+		table.WithColumns(columns),
+		table.WithRows(rows),
+		table.WithFocused(false),
+		table.WithHeight(10),
+	)
+
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(true)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.NoColor{}).
+		Background(lipgloss.NoColor{}).
+		Bold(false)
+	t.SetStyles(s)
+
+	m.netTable = t
+}
+
 func (m guiModel) Init() tea.Cmd {
 	if m.updateInterval == 0 {
 		m.updateInterval = 1 * time.Second
 	}
+
 	tea.SetWindowTitle("rtop")
+
 	return tea.Tick(m.updateInterval, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
@@ -94,6 +174,9 @@ func (m guiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		resizeBars(m.bars, m.width)
 	}
+
+	m.fsTable.Update(m)
+	m.netTable.Update(m)
 
 	return m, nil
 }
@@ -208,10 +291,22 @@ func (m guiModel) View() string {
 		),
 	)
 
+	bigGroup := bigGroupStyle.Render(
+		lipgloss.JoinHorizontal(lipgloss.Left,
+			cpuGroup,
+			memGroup,
+		),
+	)
+
 	out := outHeader +
-		cpuGroup +
-		"\n" +
-		memGroup +
+		bigGroup +
+		//cpuGroup +
+		//"\n" +
+		//memGroup +
+		"\n\n" +
+		m.fsTable.View() +
+		"\n\n" +
+		m.netTable.View() +
 		fmt.Sprintf("\n\n%s", helpStyle.Render("Press q or ESC to quit"))
 
 	mainSection := lipgloss.NewStyle().
