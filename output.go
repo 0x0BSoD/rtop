@@ -52,6 +52,21 @@ func formatDurationWithDays(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
 
+func formatBytes(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	div, exp := uint64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	return fmt.Sprintf("%.2f %cb", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
 func (m guiModel) Init() tea.Cmd {
 	if m.updateInterval == 0 {
 		m.updateInterval = 1 * time.Second
@@ -162,25 +177,29 @@ func (m guiModel) View() string {
 
 	// Memory ---
 	// free
-	outMem += fmt.Sprintf("%s %6d\n",
+	outMem += fmt.Sprintf("%s %6s\n",
 		labelStyle.Render(fmt.Sprintf("%-8s", "Free")),
-		m.stats.MemFree)
+		formatBytes(m.stats.MemFree))
 	// used
-	outMem += fmt.Sprintf("%s %6d\n",
+	outMem += fmt.Sprintf("%s %6s\n",
 		labelStyle.Render(fmt.Sprintf("%-8s", "Used")),
-		m.stats.MemTotal-m.stats.MemFree)
+		formatBytes(m.stats.MemTotal-m.stats.MemFree))
 	// buffers
-	outMem += fmt.Sprintf("%s %6d\n",
+	outMem += fmt.Sprintf("%s %6s\n",
 		labelStyle.Render(fmt.Sprintf("%-8s", "Buffers")),
-		m.stats.MemBuffers)
+		formatBytes(m.stats.MemBuffers))
 	// cached
-	outMem += fmt.Sprintf("%s %6d\n",
+	outMem += fmt.Sprintf("%s %6s\n",
 		labelStyle.Render(fmt.Sprintf("%-8s", "Cached")),
-		m.stats.MemCached)
+		formatBytes(m.stats.MemCached))
 	// swap
-	outMem += fmt.Sprintf("%s %6d\n",
+	outMem += fmt.Sprintf("%s %6s\n",
 		labelStyle.Render(fmt.Sprintf("%-8s", "Swap")),
-		m.stats.SwapTotal-m.stats.SwapFree)
+		formatBytes(m.stats.SwapTotal-m.stats.SwapFree))
+	// total
+	outMem += fmt.Sprintf("%s %6s\n",
+		labelStyle.Render(fmt.Sprintf("%-8s", "Total")),
+		formatBytes(m.stats.MemTotal))
 
 	memGroup := groupStyle.Render(
 		lipgloss.JoinVertical(lipgloss.Left,
