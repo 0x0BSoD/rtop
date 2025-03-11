@@ -1,4 +1,4 @@
-module github.com/0x0BSoD/rtop/v2
+module github.com/0x0BSoD/rtop
 
 go 1.24.0
 
