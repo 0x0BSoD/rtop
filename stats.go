@@ -27,11 +27,24 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"golang.org/x/crypto/ssh"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
+
+type Cgroups struct {
+	Version            string
+	Path               string
+	CpuUsage           float64
+	MemoryUsageCurrent float64
+	MemoryUsageLimit   float64
+	IoReadBytes        float64
+	IoWriteBytes       float64
+	Children           []*Cgroups
+}
 
 type FSInfo struct {
 	Device     string
@@ -89,6 +102,7 @@ type Stats struct {
 	FSInfos      []FSInfo
 	NetIntf      map[string]NetIntfInfo
 	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
+	Cgroups      []Cgroups
 }
 
 func getAllStats(client *ssh.Client, stats *Stats) {
@@ -100,6 +114,7 @@ func getAllStats(client *ssh.Client, stats *Stats) {
 	getInterfaces(client, stats)
 	getInterfaceInfo(client, stats)
 	getCPU(client, stats)
+	getCgroups(client, stats)
 }
 
 func getUptime(client *ssh.Client, stats *Stats) (err error) {
@@ -339,10 +354,10 @@ func parseCPUFields(fields []string, stat *cpuRaw) {
 // the CPU stats that were fetched last time round
 var preCPU cpuRaw
 
-func getCPU(client *ssh.Client, stats *Stats) (err error) {
+func getCPU(client *ssh.Client, stats *Stats) error {
 	lines, err := runCommand(client, "/bin/cat /proc/stat")
 	if err != nil {
-		return
+		return err
 	}
 
 	var (
@@ -374,5 +389,73 @@ func getCPU(client *ssh.Client, stats *Stats) (err error) {
 	stats.CPU.Guest = float32(nowCPU.Guest-preCPU.Guest) / total * 100
 END:
 	preCPU = nowCPU
-	return
+	return err
+}
+
+func getCgroups(client *ssh.Client, stats *Stats) error {
+	cgroupVersion := "v1"
+	cgroupPath := "/sys/fs/cgroup"
+
+	// Check if cgroups v2 is being used
+	isV2, err := runCommand(client,
+		fmt.Sprintf("if [ -f %s ];then echo -n 'True'; fi", filepath.Join(cgroupPath, "cgroup.controllers")))
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(isV2) == "True" {
+		cgroupVersion = "v2"
+	}
+
+	fmt.Printf("isV2: |%s|\n", isV2)
+	fmt.Println("cgroup version: ", cgroupVersion)
+
+	// Get all top-level cgroups
+	entries, err := runCommand(client, fmt.Sprintf("find %s -maxdepth 1 -type d | grep \"^%s/.*\\.slice$\"", cgroupPath, cgroupPath))
+	if err != nil {
+		return err
+	}
+	cgroups := strings.Split(strings.TrimSpace(entries), "\n")
+
+	fmt.Printf("entries: |%s|\n", entries)
+	fmt.Printf("cgroups: |%s|\n", cgroups)
+
+	for _, entry := range cgroups {
+		fmt.Printf("cgroup: %s\n", entry)
+		// cgroup CPU usage
+		data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
+		if err != nil {
+			return err
+		}
+
+		rawCpuStats := strings.Split(strings.TrimSpace(data), "\n")
+		cpuStat := make(map[string]float64, len(rawCpuStats))
+		for _, line := range rawCpuStats {
+			fields := strings.Fields(line)
+			cpuStat[fields[0]], err = strconv.ParseFloat(fields[1], 64)
+		}
+		cpuUsage := cpuStat["usage_usec"] / 1000000.00
+
+		fmt.Printf("CPU usage: %.2f seconds\n\n", cpuUsage)
+
+		//fmt.Printf("%s => cpu.stat: |%s|\n", entry, data)
+		//fmt.Printf("%s => cpu.stat: |%s|\n", entry, cpuStat)
+	}
+
+	//entries, err := os.ReadDir("./")
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
+
+	//if [ "$CGROUP_VERSION" = "v2" ]; then
+	//cgroups=$(find "$CGROUP_ROOT" -maxdepth 1 -type d | grep -v "^$CGROUP_ROOT$")
+	//else
+	//cgroups=$(find "$CGROUP_ROOT" -maxdepth 1 -type d | grep -v "^$CGROUP_ROOT$")
+	//fi
+
+	//lines, err := runCommand(client, "/bin/cat /proc/stat")
+	//if err != nil {
+	//	return err
+	//}
+	return nil
 }
