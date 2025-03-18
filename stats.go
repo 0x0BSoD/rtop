@@ -407,7 +407,6 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 		cgroupVersion = "v2"
 	}
 
-	fmt.Printf("isV2: |%s|\n", isV2)
 	fmt.Println("cgroup version: ", cgroupVersion)
 
 	// Get all top-level cgroups
@@ -417,9 +416,9 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 	}
 	cgroups := strings.Split(strings.TrimSpace(entries), "\n")
 
-	fmt.Printf("entries: |%s|\n", entries)
-	fmt.Printf("cgroups: |%s|\n", cgroups)
+	fmt.Printf("cgroups: %s\n\n", cgroups)
 
+	// TODO: Add v1 support
 	for _, entry := range cgroups {
 		fmt.Printf("cgroup: %s\n", entry)
 		// cgroup CPU usage
@@ -436,26 +435,62 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 		}
 		cpuUsage := cpuStat["usage_usec"] / 1000000.00
 
-		fmt.Printf("CPU usage: %.2f seconds\n\n", cpuUsage)
+		// cgroup Memory usage
+		data, err = runCommand(client, fmt.Sprintf("cat %s/memory.current", entry))
+		if err != nil {
+			return err
+		}
+		memStatsCurrent, _ := strconv.Atoi(strings.TrimSpace(data))
 
-		//fmt.Printf("%s => cpu.stat: |%s|\n", entry, data)
-		//fmt.Printf("%s => cpu.stat: |%s|\n", entry, cpuStat)
+		data, err = runCommand(client, fmt.Sprintf("cat %s/memory.max", entry))
+		if err != nil {
+			return err
+		}
+		memStatsMax, _ := strconv.Atoi(strings.TrimSpace(data))
+
+		// cgroup IO stats
+		data, err = runCommand(client, fmt.Sprintf("cat %s/io.stat", entry))
+		if err != nil {
+			return err
+		}
+		rawIoStats := strings.Split(strings.TrimSpace(data), "\n")
+
+		ioStat := make(map[string]map[string]int, len(rawIoStats))
+		var mapKey string
+		for _, line := range rawIoStats {
+			fields := strings.Fields(line)
+			if len(fields) > 0 {
+
+				for _, i := range fields {
+					if strings.Contains(i, ":") {
+						mapKey = fields[0]
+						ioStat[mapKey] = make(map[string]int)
+
+					}
+					if mapKey != "" && mapKey != i {
+						spltData := strings.Split(i, "=")
+						stat, _ := strconv.Atoi(spltData[1])
+						ioStat[mapKey][spltData[0]] = stat
+					}
+				}
+			}
+
+		}
+
+		ioRead := 0
+		ioWrite := 0
+		for _, device := range ioStat {
+			ioRead += device["rbytes"]
+			ioWrite += device["wbytes"]
+		}
+
+		fmt.Printf("CPU usage: %.2f seconds\n", cpuUsage)
+		fmt.Printf("Mem usage: %d bytes\n", memStatsCurrent)
+		fmt.Printf("Mem max: %d bytes\n", memStatsMax)
+		fmt.Printf("IO read: %d bytes\n", ioRead)
+		fmt.Printf("IO write: %d bytes\n\n", ioWrite)
+
 	}
 
-	//entries, err := os.ReadDir("./")
-	//if err != nil {
-	//	log.Fatal(err)
-	//}
-
-	//if [ "$CGROUP_VERSION" = "v2" ]; then
-	//cgroups=$(find "$CGROUP_ROOT" -maxdepth 1 -type d | grep -v "^$CGROUP_ROOT$")
-	//else
-	//cgroups=$(find "$CGROUP_ROOT" -maxdepth 1 -type d | grep -v "^$CGROUP_ROOT$")
-	//fi
-
-	//lines, err := runCommand(client, "/bin/cat /proc/stat")
-	//if err != nil {
-	//	return err
-	//}
 	return nil
 }
