@@ -30,6 +30,7 @@ type guiModel struct {
 	bars           map[string]progress.Model
 	fsTable        table.Model
 	netTable       table.Model
+	cgroupView     bool
 }
 
 func (m guiModel) Init() tea.Cmd {
@@ -50,6 +51,8 @@ func (m guiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "esc", "ctrl+c":
 			return m, tea.Quit
+		case "c":
+			m.cgroupView = !m.cgroupView
 		}
 	case tickMsg:
 		getAllStats(m.client, &m.stats)
@@ -187,14 +190,31 @@ func (m guiModel) View() string {
 
 	out := outHeader +
 		bigGroup +
-		//cpuGroup +
-		//"\n" +
-		//memGroup +
 		"\n\n" +
 		m.fsTable.View() +
-		"\n\n" +
-		m.netTable.View() +
-		fmt.Sprintf("\n\n%s", helpStyle.Render("Press q or ESC to quit"))
+		"\n\n"
+	if m.cgroupView {
+		var cgroupsOut string
+		for _, c := range m.stats.Cgroups {
+			memLimit := formatBytes(uint64(c.MemoryUsageLimit))
+			if c.MemoryUsageLimit == 0 {
+				memLimit = "∞"
+			}
+			cgroupsOut += fmt.Sprintf("%s: %v\n", labelStyle.Render("Name"), c.Path) +
+				fmt.Sprintf("\t%s: %.2f seconds\n", labelStyle.Render("CPU time"), c.CpuUsage) +
+				fmt.Sprintf("\t%s: %s / %s\n", labelStyle.Render("Mem"),
+					formatBytes(uint64(c.MemoryUsageCurrent)), memLimit) +
+				fmt.Sprintf("\t%s: Read %s Write %s\n", labelStyle.Render("IO"),
+					formatBytes(uint64(c.IoReadBytes)), formatBytes(uint64(c.IoWriteBytes)))
+		}
+
+		out += fmt.Sprintf("%s\n", keywordStyle.Render("cGroups")) +
+			cgroupsOut
+	} else {
+		out += fmt.Sprintf("%s\n", keywordStyle.Render("Network")) +
+			m.netTable.View()
+	}
+	out += fmt.Sprintf("\n\n%s", helpStyle.Render("Press c to change view, q or ESC to quit"))
 
 	mainSection := lipgloss.NewStyle().
 		Width(contentWidth).

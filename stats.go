@@ -39,11 +39,10 @@ type Cgroups struct {
 	Version            string
 	Path               string
 	CpuUsage           float64
-	MemoryUsageCurrent float64
-	MemoryUsageLimit   float64
-	IoReadBytes        float64
-	IoWriteBytes       float64
-	Children           []*Cgroups
+	MemoryUsageCurrent int
+	MemoryUsageLimit   int
+	IoReadBytes        int
+	IoWriteBytes       int
 }
 
 type FSInfo struct {
@@ -407,8 +406,6 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 		cgroupVersion = "v2"
 	}
 
-	fmt.Println("cgroup version: ", cgroupVersion)
-
 	// Get all top-level cgroups
 	entries, err := runCommand(client, fmt.Sprintf("find %s -maxdepth 1 -type d | grep \"^%s/.*\\.slice$\"", cgroupPath, cgroupPath))
 	if err != nil {
@@ -416,11 +413,9 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 	}
 	cgroups := strings.Split(strings.TrimSpace(entries), "\n")
 
-	fmt.Printf("cgroups: %s\n\n", cgroups)
-
 	// TODO: Add v1 support
+	var res []Cgroups
 	for _, entry := range cgroups {
-		fmt.Printf("cgroup: %s\n", entry)
 		// cgroup CPU usage
 		data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
 		if err != nil {
@@ -484,13 +479,17 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 			ioWrite += device["wbytes"]
 		}
 
-		fmt.Printf("CPU usage: %.2f seconds\n", cpuUsage)
-		fmt.Printf("Mem usage: %d bytes\n", memStatsCurrent)
-		fmt.Printf("Mem max: %d bytes\n", memStatsMax)
-		fmt.Printf("IO read: %d bytes\n", ioRead)
-		fmt.Printf("IO write: %d bytes\n\n", ioWrite)
-
+		res = append(res, Cgroups{
+			Version:            cgroupVersion,
+			Path:               entry,
+			CpuUsage:           cpuUsage,
+			MemoryUsageCurrent: memStatsCurrent,
+			MemoryUsageLimit:   memStatsMax,
+			IoReadBytes:        ioRead,
+			IoWriteBytes:       ioWrite,
+		})
 	}
+	stats.Cgroups = res
 
 	return nil
 }
