@@ -299,6 +299,7 @@ func main() {
 		client:         client,
 		updateInterval: interval,
 		bars:           progressBars,
+		selected:       -1,
 	}
 	getAllStats(m.client, &m.stats)
 	initFsTable(&m)

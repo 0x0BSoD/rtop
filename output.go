@@ -31,6 +31,8 @@ type guiModel struct {
 	fsTable        table.Model
 	netTable       table.Model
 	cgroupView     bool
+	choice         int
+	selected       int
 }
 
 func (m guiModel) Init() tea.Cmd {
@@ -49,10 +51,25 @@ func (m guiModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "esc", "ctrl+c":
-			return m, tea.Quit
+		case "j", "down":
+			cgroupsLen := len(m.stats.Cgroups) - 1
+			m.choice++
+			if m.choice > cgroupsLen {
+				m.choice = cgroupsLen
+			}
+		case "k", "up":
+			m.choice--
+			if m.choice < 0 {
+				m.choice = 0
+			}
+		case "enter", "l", "right":
+			m.selected = m.choice
+		case "h", "left":
+			m.selected = -1
 		case "c":
 			m.cgroupView = !m.cgroupView
+		case "q", "esc", "ctrl+c":
+			return m, tea.Quit
 		}
 	case tickMsg:
 		getAllStats(m.client, &m.stats)
@@ -192,35 +209,48 @@ func (m guiModel) View() string {
 		bigGroup +
 		"\n\n" +
 		m.fsTable.View() +
-		"\n\n"
-	if m.cgroupView {
-		var cgroupsOut string
-		for _, c := range m.stats.Cgroups {
-			memLimit := formatBytes(uint64(c.MemoryUsageLimit))
-			if c.MemoryUsageLimit == 0 {
-				memLimit = "∞"
-			}
-			cgroupsOut += fmt.Sprintf("%s: %v\n", labelStyle.Render("Name"), c.Path) +
-				fmt.Sprintf("\t%s: %.2f seconds\n", labelStyle.Render("CPU time"), c.CpuUsage) +
-				fmt.Sprintf("\t%s: %s / %s\n", labelStyle.Render("Mem"),
-					formatBytes(uint64(c.MemoryUsageCurrent)), memLimit) +
-				fmt.Sprintf("\t%s: Read %s Write %s\n", labelStyle.Render("IO"),
-					formatBytes(uint64(c.IoReadBytes)), formatBytes(uint64(c.IoWriteBytes)))
-		}
+		"\n\n" +
+		m.netTable.View()
 
-		out += fmt.Sprintf("%s\n", keywordStyle.Render("cGroups")) +
-			cgroupsOut
-	} else {
-		out += fmt.Sprintf("%s\n", keywordStyle.Render("Network")) +
-			m.netTable.View()
+	if m.cgroupView {
+		out = outHeader +
+			fmt.Sprintf("%s\n", keywordStyle.Render("cGroups"))
+
+		switch m.selected {
+		case -1:
+			for k, c := range m.stats.Cgroups {
+				memLimit := formatBytes(uint64(c.MemoryUsageLimit))
+				if c.MemoryUsageLimit == 0 {
+					memLimit = "∞"
+				}
+				dot := " "
+				if k == m.choice {
+					dot = "•"
+				}
+				out += fmt.Sprintf("[%s] %s: %v\n", dot, labelStyle.Render("Name"), c.Path) +
+					fmt.Sprintf("\t%s: %.2f seconds\n", labelStyle.Render("CPU time"), c.CpuUsage) +
+					fmt.Sprintf("\t%s: %s / %s\n", labelStyle.Render("Mem"),
+						formatBytes(uint64(c.MemoryUsageCurrent)), memLimit) +
+					fmt.Sprintf("\t%s: Read %s Write %s\n", labelStyle.Render("IO"),
+						formatBytes(uint64(c.IoReadBytes)), formatBytes(uint64(c.IoWriteBytes)))
+			}
+		default:
+			cgroup := m.stats.Cgroups[m.selected]
+			memLimit := formatBytes(uint64(cgroup.MemoryUsageLimit))
+			out += fmt.Sprintf("%s: %v\n", labelStyle.Render("Name"), cgroup.Path) +
+				fmt.Sprintf("\t%s: %.2f seconds\n", labelStyle.Render("CPU time"), cgroup.CpuUsage) +
+				fmt.Sprintf("\t%s: %s / %s\n", labelStyle.Render("Mem"),
+					formatBytes(uint64(cgroup.MemoryUsageCurrent)), memLimit) +
+				fmt.Sprintf("\t%s: Read %s Write %s\n", labelStyle.Render("IO"),
+					formatBytes(uint64(cgroup.IoReadBytes)), formatBytes(uint64(cgroup.IoWriteBytes)))
+		}
 	}
-	out += fmt.Sprintf("\n\n%s", helpStyle.Render("Press c to change view, q or ESC to quit"))
 
 	mainSection := lipgloss.NewStyle().
 		Width(contentWidth).
 		Height(contentHeight).
 		Padding(verticalPadding, horizontalPadding).
-		Render(out)
+		Render(out + fmt.Sprintf("%d\n\n%s", m.selected, helpStyle.Render("Press c to change view, q or ESC to quit")))
 
 	return mainSection
 }

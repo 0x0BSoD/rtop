@@ -29,7 +29,6 @@ import (
 	"bufio"
 	"fmt"
 	"golang.org/x/crypto/ssh"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -391,20 +390,98 @@ END:
 	return err
 }
 
-func getCgroups(client *ssh.Client, stats *Stats) error {
-	cgroupVersion := "v1"
-	cgroupPath := "/sys/fs/cgroup"
-
-	// Check if cgroups v2 is being used
-	isV2, err := runCommand(client,
-		fmt.Sprintf("if [ -f %s ];then echo -n 'True'; fi", filepath.Join(cgroupPath, "cgroup.controllers")))
+func getCgroupsData(entry string, stats *Stats, client *ssh.Client) error {
+	// cgroup CPU usage
+	data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
 	if err != nil {
 		return err
 	}
 
-	if strings.TrimSpace(isV2) == "True" {
-		cgroupVersion = "v2"
+	rawCpuStats := strings.Split(strings.TrimSpace(data), "\n")
+	cpuStat := make(map[string]float64, len(rawCpuStats))
+	for _, line := range rawCpuStats {
+		fields := strings.Fields(line)
+		cpuStat[fields[0]], err = strconv.ParseFloat(fields[1], 64)
 	}
+	cpuUsage := cpuStat["usage_usec"] / 1000000.00
+
+	// cgroup Memory usage
+	data, err = runCommand(client, fmt.Sprintf("cat %s/memory.current", entry))
+	if err != nil {
+		return err
+	}
+	memStatsCurrent, _ := strconv.Atoi(strings.TrimSpace(data))
+
+	data, err = runCommand(client, fmt.Sprintf("cat %s/memory.max", entry))
+	if err != nil {
+		return err
+	}
+	memStatsMax, _ := strconv.Atoi(strings.TrimSpace(data))
+
+	// cgroup IO stats
+	data, err = runCommand(client, fmt.Sprintf("cat %s/io.stat", entry))
+	if err != nil {
+		return err
+	}
+	rawIoStats := strings.Split(strings.TrimSpace(data), "\n")
+
+	ioStat := make(map[string]map[string]int, len(rawIoStats))
+	var mapKey string
+	for _, line := range rawIoStats {
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+
+			for _, i := range fields {
+				if strings.Contains(i, ":") {
+					mapKey = fields[0]
+					ioStat[mapKey] = make(map[string]int)
+
+				}
+				if mapKey != "" && mapKey != i {
+					spltData := strings.Split(i, "=")
+					stat, _ := strconv.Atoi(spltData[1])
+					ioStat[mapKey][spltData[0]] = stat
+				}
+			}
+		}
+
+	}
+
+	ioRead := 0
+	ioWrite := 0
+	for _, device := range ioStat {
+		ioRead += device["rbytes"]
+		ioWrite += device["wbytes"]
+	}
+
+	stats.Cgroups = append(stats.Cgroups, Cgroups{
+		Version:            "v2",
+		Path:               entry,
+		CpuUsage:           cpuUsage,
+		MemoryUsageCurrent: memStatsCurrent,
+		MemoryUsageLimit:   memStatsMax,
+		IoReadBytes:        ioRead,
+		IoWriteBytes:       ioWrite,
+	})
+
+	return nil
+}
+
+func getCgroups(client *ssh.Client, stats *Stats) error {
+	//cgroupVersion := "v1"
+
+	cgroupPath := "/sys/fs/cgroup"
+
+	// Check if cgroups v2 is being used
+	//isV2, err := runCommand(client,
+	//	fmt.Sprintf("if [ -f %s ];then echo -n 'True'; fi", filepath.Join(cgroupPath, "cgroup.controllers")))
+	//if err != nil {
+	//	return err
+	//}
+
+	//if strings.TrimSpace(isV2) == "True" {
+	//	cgroupVersion = "v2"
+	//}
 
 	// Get all top-level cgroups
 	entries, err := runCommand(client, fmt.Sprintf("find %s -maxdepth 1 -type d | grep \"^%s/.*\\.slice$\"", cgroupPath, cgroupPath))
@@ -413,83 +490,16 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 	}
 	cgroups := strings.Split(strings.TrimSpace(entries), "\n")
 
+	// Reset slice
+	stats.Cgroups = nil
+
 	// TODO: Add v1 support
-	var res []Cgroups
 	for _, entry := range cgroups {
-		// cgroup CPU usage
-		data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
+		err := getCgroupsData(entry, stats, client)
 		if err != nil {
 			return err
 		}
-
-		rawCpuStats := strings.Split(strings.TrimSpace(data), "\n")
-		cpuStat := make(map[string]float64, len(rawCpuStats))
-		for _, line := range rawCpuStats {
-			fields := strings.Fields(line)
-			cpuStat[fields[0]], err = strconv.ParseFloat(fields[1], 64)
-		}
-		cpuUsage := cpuStat["usage_usec"] / 1000000.00
-
-		// cgroup Memory usage
-		data, err = runCommand(client, fmt.Sprintf("cat %s/memory.current", entry))
-		if err != nil {
-			return err
-		}
-		memStatsCurrent, _ := strconv.Atoi(strings.TrimSpace(data))
-
-		data, err = runCommand(client, fmt.Sprintf("cat %s/memory.max", entry))
-		if err != nil {
-			return err
-		}
-		memStatsMax, _ := strconv.Atoi(strings.TrimSpace(data))
-
-		// cgroup IO stats
-		data, err = runCommand(client, fmt.Sprintf("cat %s/io.stat", entry))
-		if err != nil {
-			return err
-		}
-		rawIoStats := strings.Split(strings.TrimSpace(data), "\n")
-
-		ioStat := make(map[string]map[string]int, len(rawIoStats))
-		var mapKey string
-		for _, line := range rawIoStats {
-			fields := strings.Fields(line)
-			if len(fields) > 0 {
-
-				for _, i := range fields {
-					if strings.Contains(i, ":") {
-						mapKey = fields[0]
-						ioStat[mapKey] = make(map[string]int)
-
-					}
-					if mapKey != "" && mapKey != i {
-						spltData := strings.Split(i, "=")
-						stat, _ := strconv.Atoi(spltData[1])
-						ioStat[mapKey][spltData[0]] = stat
-					}
-				}
-			}
-
-		}
-
-		ioRead := 0
-		ioWrite := 0
-		for _, device := range ioStat {
-			ioRead += device["rbytes"]
-			ioWrite += device["wbytes"]
-		}
-
-		res = append(res, Cgroups{
-			Version:            cgroupVersion,
-			Path:               entry,
-			CpuUsage:           cpuUsage,
-			MemoryUsageCurrent: memStatsCurrent,
-			MemoryUsageLimit:   memStatsMax,
-			IoReadBytes:        ioRead,
-			IoWriteBytes:       ioWrite,
-		})
 	}
-	stats.Cgroups = res
 
 	return nil
 }
