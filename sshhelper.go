@@ -216,12 +216,14 @@ func sshConnect(user, addr, keyPath string) (*ssh.Client, error) {
 	auths := make([]ssh.AuthMethod, 0)
 
 	// Try connecting via agent first
+	Info("SSH Agent checking")
 	client, err := tryAgentConnect(user, addr)
 	if err != nil {
 		Error("SSH connection with agent failed: %v", err)
 		return nil, fmt.Errorf("filed to use agent: %w", err)
 	}
 	if client != nil {
+		Info("SSH connection with agent established successfully")
 		return client, nil
 	}
 

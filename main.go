@@ -280,6 +280,24 @@ func main() {
 
 	validateOS(client)
 
+	//var stats Stats
+	//getAllStats(client, &stats)
+	//
+	//fmt.Println("=========================")
+	//fmt.Println("=========================")
+	//for _, i := range stats.Cgroups {
+	//	fmt.Println("Path:", i.Path)
+	//	fmt.Println("CPU:", i.CpuUsage)
+	//	fmt.Printf("Mem: %d / %d\n", i.MemoryUsageCurrent, i.MemoryUsageLimit)
+	//	fmt.Printf("IO: %d / %d\n", i.IoReadBytes, i.IoWriteBytes)
+	//	if len(i.Children) != 0 {
+	//		fmt.Println("Children:")
+	//		printStuff(1, i.Children)
+	//	}
+	//}
+	//fmt.Println("=========================")
+	//fmt.Println("=========================")
+
 	Info("Starting monitoring loop with refresh interval of %v", interval)
 
 	// Initialize progress bars
@@ -315,3 +333,17 @@ func main() {
 		rtopLogger.Close()
 	}
 }
+
+//func printStuff(iter int, cg []*Cgroup) {
+//	for _, c := range cg {
+//		fmt.Println(strings.Repeat("-", iter), "Path:", c.Path)
+//		fmt.Println(strings.Repeat("  ", iter), "CPU:", c.CpuUsage)
+//		fmt.Printf("%s Mem: %d / %d\n", strings.Repeat("  ", iter), c.MemoryUsageCurrent, c.MemoryUsageLimit)
+//		fmt.Printf("%s IO: %d / %d\n", strings.Repeat("  ", iter), c.IoReadBytes, c.IoWriteBytes)
+//		if len(c.Children) != 0 {
+//			fmt.Println(strings.Repeat("  ", iter), "Children:")
+//			iter += 1
+//			printStuff(iter, c.Children)
+//		}
+//	}
+//}

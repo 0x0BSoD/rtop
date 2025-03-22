@@ -34,7 +34,7 @@ import (
 	"time"
 )
 
-type Cgroups struct {
+type Cgroup struct {
 	Version            string
 	Path               string
 	CpuUsage           float64
@@ -42,6 +42,7 @@ type Cgroups struct {
 	MemoryUsageLimit   int
 	IoReadBytes        int
 	IoWriteBytes       int
+	Children           []*Cgroup
 }
 
 type FSInfo struct {
@@ -100,7 +101,7 @@ type Stats struct {
 	FSInfos      []FSInfo
 	NetIntf      map[string]NetIntfInfo
 	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
-	Cgroups      []Cgroups
+	Cgroups      []Cgroup
 }
 
 func getAllStats(client *ssh.Client, stats *Stats) {
@@ -390,8 +391,26 @@ END:
 	return err
 }
 
-func getCgroupsData(entry string, stats *Stats, client *ssh.Client) error {
-	// cgroup CPU usage
+func findChildCgroups(parentPath string, client *ssh.Client) ([]string, error) {
+	data, err := runCommand(client, fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 -type d | grep slice$", parentPath))
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.Split(strings.TrimSpace(data), "\n"), nil
+}
+
+func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Client) error {
+	cgroup := &Cgroup{
+		Version:  "v2",
+		Path:     entry,
+		Children: []*Cgroup{},
+	}
+
+	if parent != nil {
+		parent.Children = append(parent.Children, cgroup)
+	}
+
 	data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
 	if err != nil {
 		return err
@@ -401,24 +420,27 @@ func getCgroupsData(entry string, stats *Stats, client *ssh.Client) error {
 	cpuStat := make(map[string]float64, len(rawCpuStats))
 	for _, line := range rawCpuStats {
 		fields := strings.Fields(line)
-		cpuStat[fields[0]], err = strconv.ParseFloat(fields[1], 64)
+		if len(fields) >= 2 {
+			cpuStat[fields[0]], err = strconv.ParseFloat(fields[1], 64)
+			if err != nil {
+				continue
+			}
+		}
 	}
-	cpuUsage := cpuStat["usage_usec"] / 1000000.00
+	cgroup.CpuUsage = cpuStat["usage_usec"] / 1000000.00
 
-	// cgroup Memory usage
 	data, err = runCommand(client, fmt.Sprintf("cat %s/memory.current", entry))
 	if err != nil {
 		return err
 	}
-	memStatsCurrent, _ := strconv.Atoi(strings.TrimSpace(data))
+	cgroup.MemoryUsageCurrent, _ = strconv.Atoi(strings.TrimSpace(data))
 
 	data, err = runCommand(client, fmt.Sprintf("cat %s/memory.max", entry))
 	if err != nil {
 		return err
 	}
-	memStatsMax, _ := strconv.Atoi(strings.TrimSpace(data))
+	cgroup.MemoryUsageLimit, _ = strconv.Atoi(strings.TrimSpace(data))
 
-	// cgroup IO stats
 	data, err = runCommand(client, fmt.Sprintf("cat %s/io.stat", entry))
 	if err != nil {
 		return err
@@ -430,21 +452,20 @@ func getCgroupsData(entry string, stats *Stats, client *ssh.Client) error {
 	for _, line := range rawIoStats {
 		fields := strings.Fields(line)
 		if len(fields) > 0 {
-
 			for _, i := range fields {
 				if strings.Contains(i, ":") {
 					mapKey = fields[0]
 					ioStat[mapKey] = make(map[string]int)
-
 				}
 				if mapKey != "" && mapKey != i {
 					spltData := strings.Split(i, "=")
-					stat, _ := strconv.Atoi(spltData[1])
-					ioStat[mapKey][spltData[0]] = stat
+					if len(spltData) == 2 {
+						stat, _ := strconv.Atoi(spltData[1])
+						ioStat[mapKey][spltData[0]] = stat
+					}
 				}
 			}
 		}
-
 	}
 
 	ioRead := 0
@@ -454,15 +475,27 @@ func getCgroupsData(entry string, stats *Stats, client *ssh.Client) error {
 		ioWrite += device["wbytes"]
 	}
 
-	stats.Cgroups = append(stats.Cgroups, Cgroups{
-		Version:            "v2",
-		Path:               entry,
-		CpuUsage:           cpuUsage,
-		MemoryUsageCurrent: memStatsCurrent,
-		MemoryUsageLimit:   memStatsMax,
-		IoReadBytes:        ioRead,
-		IoWriteBytes:       ioWrite,
-	})
+	cgroup.IoReadBytes = ioRead
+	cgroup.IoWriteBytes = ioWrite
+
+	childDirs, err := findChildCgroups(entry, client)
+	if err != nil {
+		return err
+	}
+
+	// Recursively process each child
+	for _, childDir := range childDirs {
+		err = getCgroupsData(childDir, cgroup, stats, client)
+		if err != nil {
+			// Handle error or continue with next child
+			continue
+		}
+	}
+
+	// If this is a root call (no parent), add to stats
+	if parent == nil {
+		stats.Cgroups = append(stats.Cgroups, *cgroup)
+	}
 
 	return nil
 }
@@ -495,7 +528,7 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 
 	// TODO: Add v1 support
 	for _, entry := range cgroups {
-		err := getCgroupsData(entry, stats, client)
+		err := getCgroupsData(entry, nil, stats, client)
 		if err != nil {
 			return err
 		}
