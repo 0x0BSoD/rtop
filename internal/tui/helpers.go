@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"fmt"
@@ -37,8 +37,6 @@ func formatBytes(bytes uint64) string {
 	return fmt.Sprintf("%.2f %cb", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// BubbleTea helpers
-
 func resizeBars(bars map[string]progress.Model, width int) {
 	for _, bar := range bars {
 		bar.Width = width - 2*2 - 4
@@ -48,7 +46,7 @@ func resizeBars(bars map[string]progress.Model, width int) {
 	}
 }
 
-func initFsTable(m *guiModel) {
+func InitFsTable(m *Model) {
 	columns := []table.Column{
 		{Title: "Device", Width: 30},
 		{Title: "Mount", Width: 15},
@@ -56,8 +54,8 @@ func initFsTable(m *guiModel) {
 		{Title: "Total", Width: 10},
 	}
 
-	rows := make([]table.Row, 0, len(m.stats.FSInfos))
-	for _, d := range m.stats.FSInfos {
+	rows := make([]table.Row, 0, len(m.SshFetcher.Stats.FSInfos))
+	for _, d := range m.SshFetcher.Stats.FSInfos {
 		rows = append(rows, table.Row{
 			d.Device, d.MountPoint, formatBytes(d.Free), formatBytes(d.Used + d.Free),
 		})
@@ -85,7 +83,7 @@ func initFsTable(m *guiModel) {
 	m.fsTable = t
 }
 
-func initNetTable(m *guiModel) {
+func InitNetTable(m *Model) {
 	columns := []table.Column{
 		{Title: "Name", Width: 15},
 		{Title: "IPv4", Width: 17},
@@ -94,8 +92,8 @@ func initNetTable(m *guiModel) {
 		{Title: "TX", Width: 10},
 	}
 
-	rows := make([]table.Row, 0, len(m.stats.FSInfos))
-	for n, d := range m.stats.NetIntf {
+	rows := make([]table.Row, 0, len(m.SshFetcher.Stats.FSInfos))
+	for n, d := range m.SshFetcher.Stats.NetIntf {
 		rows = append(rows, table.Row{
 			n, d.IPv4, d.IPv6, formatBytes(d.Rx), formatBytes(d.Tx),
 		})

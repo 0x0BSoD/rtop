@@ -27,6 +27,9 @@ package main
 
 import (
 	"fmt"
+	"github.com/0x0BSoD/rtop/internal/stats"
+	"github.com/0x0BSoD/rtop/internal/tui"
+	"github.com/0x0BSoD/rtop/pkg/logger"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"log"
@@ -36,8 +39,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 const VERSION = "1.0"
@@ -148,11 +149,11 @@ func parseCmdLine() (host string, port int, user, key string, interval time.Dura
 		host = p[0]
 		var err error
 		if port, err = strconv.Atoi(p[1]); err != nil {
-			Fatal("bad port: %v", err)
+			logger.Fatal("bad port: %v", err)
 			usage(1)
 		}
 		if port <= 0 || port >= 65536 {
-			Fatal("bad port: %d", port)
+			logger.Fatal("bad port: %d", port)
 			usage(1)
 		}
 	} else {
@@ -164,11 +165,11 @@ func parseCmdLine() (host string, port int, user, key string, interval time.Dura
 	if len(argInt) > 0 {
 		i, err := strconv.ParseUint(argInt, 10, 64)
 		if err != nil {
-			Fatal("bad interval: %v", err)
+			logger.Fatal("bad interval: %v", err)
 			usage(1)
 		}
 		if i <= 0 {
-			Fatal("bad interval: %d", i)
+			logger.Fatal("bad interval: %d", i)
 			usage(1)
 		}
 		interval = time.Duration(i) * time.Second
@@ -177,128 +178,95 @@ func parseCmdLine() (host string, port int, user, key string, interval time.Dura
 	return
 }
 
-// validateOS - rtop only support for Linux system
-func validateOS(client *ssh.Client) {
-	Debug("Validating remote OS type")
-	ostype, err := runCommand(client, "uname")
-	if err != nil {
-		Fatal("Failed to get OS type: %v", err)
-		os.Exit(1)
-	}
-	//remove newline character
-	ostype = strings.Trim(ostype, "\n")
-
-	Info("Remote OS detected: %s", ostype)
-	if !strings.EqualFold(ostype, "Linux") {
-		Fatal("rtop not supported for %s system", ostype)
-		os.Exit(1)
-	}
-	Debug("OS validation successful")
-}
-
 //----------------------------------------------------------------------------
 
 func main() {
+
 	// get params from command line
 	host, port, username, key, interval, logLevel, logFile := parseCmdLine()
 
 	// Initialize logging
-	InitLogging(logLevel, true, logFile)
-	Info("rtop %s starting up", VERSION)
-	Debug("Command line arguments: host=%s, port=%d, username=%s, key=%s, interval=%v",
+	logger.InitLogging(logLevel, true, logFile)
+	defer logger.RtopLogger.Close()
+	logger.Info("rtop %s starting up", VERSION)
+	logger.Debug("Command line arguments: host=%s, port=%d, username=%s, key=%s, interval=%v",
 		host, port, username, key, interval)
 
 	// get current user
 	currentUser, err := user.Current()
 	if err != nil {
-		Fatal("Failed to get current user: %v", err)
+		logger.Fatal("Failed to get current user: %v", err)
 		return
 	}
-	Debug("Current user: %s", currentUser.Username)
+	logger.Debug("Current user: %s", currentUser.Username)
 
 	// fill from ~/.ssh/config if possible
 	sshConfig := filepath.Join(currentUser.HomeDir, ".ssh", "config")
 	if _, err := os.Stat(sshConfig); err == nil {
-		Debug("Found SSH config at %s", sshConfig)
-		if parseSshConfig(sshConfig) {
-			Debug("Successfully parsed SSH config")
-			shost, sport, suser, skey := getSshEntry(host)
+		logger.Debug("Found SSH config at %s", sshConfig)
+		if stats.ParseSshConfig(sshConfig) {
+			logger.Debug("Successfully parsed SSH config")
+			shost, sport, suser, skey := stats.GetSshEntry(host)
 			if len(shost) > 0 {
-				Debug("Using host from SSH config: %s", shost)
+				logger.Debug("Using host from SSH config: %s", shost)
 				host = shost
 			}
 			if sport != 0 && port == 0 {
-				Debug("Using port from SSH config: %d", sport)
+				logger.Debug("Using port from SSH config: %d", sport)
 				port = sport
 			}
 			if len(suser) > 0 && len(username) == 0 {
-				Debug("Using username from SSH config: %s", suser)
+				logger.Debug("Using username from SSH config: %s", suser)
 				username = suser
 			}
 			if len(skey) > 0 && len(key) == 0 {
-				Debug("Using key from SSH config: %s", skey)
+				logger.Debug("Using key from SSH config: %s", skey)
 				key = skey
 			}
 		} else {
-			Debug("Failed to parse SSH config")
+			logger.Debug("Failed to parse SSH config")
 		}
 	} else {
-		Debug("SSH config not found at %s", sshConfig)
+		logger.Debug("SSH config not found at %s", sshConfig)
 	}
 
 	// fill in still-unknown ones with defaults
 	if port == 0 {
-		Debug("Using default port: 22")
+		logger.Debug("Using default port: 22")
 		port = 22
 	}
 	if len(username) == 0 {
-		Debug("Using current username: %s", currentUser.Username)
+		logger.Debug("Using current username: %s", currentUser.Username)
 		username = currentUser.Username
 	}
 	if len(key) == 0 {
 		idrsap := filepath.Join(currentUser.HomeDir, ".ssh", "id_rsa")
 		if _, err := os.Stat(idrsap); err == nil {
-			Debug("Using default SSH key: %s", idrsap)
+			logger.Debug("Using default SSH key: %s", idrsap)
 			key = idrsap
 		} else {
-			Debug("Default SSH key not found at %s", idrsap)
+			logger.Debug("Default SSH key not found at %s", idrsap)
 		}
 	}
 	if interval == 0 {
-		Debug("Using default refresh interval: %d seconds", DEFAULT_REFRESH)
+		logger.Debug("Using default refresh interval: %d seconds", DEFAULT_REFRESH)
 		interval = DEFAULT_REFRESH * time.Second
 	}
 
-	Info("Connecting to %s@%s:%d using key %s", username, host, port, key)
+	logger.Info("Connecting to %s@%s:%d using key %s", username, host, port, key)
 	addr := fmt.Sprintf("%s:%d", host, port)
-	client, err := sshConnect(username, addr, key)
+	client, err := stats.SshConnect(username, addr, key)
 	if err != nil {
-		Fatal("SSH connect error: %v", err)
+		logger.Fatal("SSH connect error: %v", err)
 		os.Exit(2)
 	}
-	Info("Successfully connected to %s", addr)
+	logger.Info("Successfully connected to %s", addr)
 
-	validateOS(client)
+	sshFetcher := stats.NewSshFetcher(client)
 
-	//var stats Stats
-	//getAllStats(client, &stats)
-	//
-	//fmt.Println("=========================")
-	//fmt.Println("=========================")
-	//for _, i := range stats.Cgroups {
-	//	fmt.Println("Path:", i.Path)
-	//	fmt.Println("CPU:", i.CpuUsage)
-	//	fmt.Printf("Mem: %d / %d\n", i.MemoryUsageCurrent, i.MemoryUsageLimit)
-	//	fmt.Printf("IO: %d / %d\n", i.IoReadBytes, i.IoWriteBytes)
-	//	if len(i.Children) != 0 {
-	//		fmt.Println("Children:")
-	//		printStuff(1, i.Children)
-	//	}
-	//}
-	//fmt.Println("=========================")
-	//fmt.Println("=========================")
+	sshFetcher.ValidateOS()
 
-	Info("Starting monitoring loop with refresh interval of %v", interval)
+	logger.Info("Starting monitoring loop with refresh interval of %v", interval)
 
 	// Initialize progress bars
 	progressBars := make(map[string]progress.Model, 10)
@@ -313,37 +281,18 @@ func main() {
 	progressBars["nice"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
 	progressBars["steal"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
 
-	m := guiModel{
-		client:         client,
-		updateInterval: interval,
-		bars:           progressBars,
-		selected:       -1,
+	m := tui.Model{
+		SshFetcher:     sshFetcher,
+		UpdateInterval: interval,
+		Bars:           progressBars,
 	}
-	getAllStats(m.client, &m.stats)
-	initFsTable(&m)
-	initNetTable(&m)
+	sshFetcher.GetAllStats()
+	tui.InitFsTable(&m)
+	tui.InitNetTable(&m)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}
 
-	Info("rtop shutting down")
-	// Close any open resources
-	if rtopLogger != nil {
-		rtopLogger.Close()
-	}
+	logger.Info("rtop shutting down")
 }
-
-//func printStuff(iter int, cg []*Cgroup) {
-//	for _, c := range cg {
-//		fmt.Println(strings.Repeat("-", iter), "Path:", c.Path)
-//		fmt.Println(strings.Repeat("  ", iter), "CPU:", c.CpuUsage)
-//		fmt.Printf("%s Mem: %d / %d\n", strings.Repeat("  ", iter), c.MemoryUsageCurrent, c.MemoryUsageLimit)
-//		fmt.Printf("%s IO: %d / %d\n", strings.Repeat("  ", iter), c.IoReadBytes, c.IoWriteBytes)
-//		if len(c.Children) != 0 {
-//			fmt.Println(strings.Repeat("  ", iter), "Children:")
-//			iter += 1
-//			printStuff(iter, c.Children)
-//		}
-//	}
-//}

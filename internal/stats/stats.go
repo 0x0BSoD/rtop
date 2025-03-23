@@ -23,15 +23,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-package main
+package stats
 
 import (
 	"bufio"
 	"fmt"
 	"golang.org/x/crypto/ssh"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/0x0BSoD/rtop/pkg/logger"
 )
 
 type Cgroup struct {
@@ -42,7 +45,9 @@ type Cgroup struct {
 	MemoryUsageLimit   int
 	IoReadBytes        int
 	IoWriteBytes       int
-	Children           []*Cgroup
+	Open               bool
+	Childs             []*Cgroup
+	Parent             *Cgroup
 }
 
 type FSInfo struct {
@@ -101,19 +106,79 @@ type Stats struct {
 	FSInfos      []FSInfo
 	NetIntf      map[string]NetIntfInfo
 	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
-	Cgroups      []Cgroup
+	Cgroups      []*Cgroup
 }
 
-func getAllStats(client *ssh.Client, stats *Stats) {
-	getUptime(client, stats)
-	getHostname(client, stats)
-	getLoad(client, stats)
-	getMemInfo(client, stats)
-	getFSInfo(client, stats)
-	getInterfaces(client, stats)
-	getInterfaceInfo(client, stats)
-	getCPU(client, stats)
-	getCgroups(client, stats)
+type SshFetcher struct {
+	Client *ssh.Client
+	Logger *logger.Logger
+	Stats  *Stats
+}
+
+func NewSshFetcher(client *ssh.Client) *SshFetcher {
+	return &SshFetcher{
+		Client: client,
+		Stats:  &Stats{},
+	}
+}
+
+// ValidateOS - rtop only support for Linux system
+func (s *SshFetcher) ValidateOS() {
+	logger.Debug("Validating remote OS type")
+	ostype, err := runCommand(s.Client, "uname")
+	if err != nil {
+		logger.Fatal("Failed to get OS type: %v", err)
+		os.Exit(1)
+	}
+	//remove newline character
+	ostype = strings.Trim(ostype, "\n")
+
+	logger.Info("Remote OS detected: %s", ostype)
+	if !strings.EqualFold(ostype, "Linux") {
+		logger.Fatal("rtop not supported for %s system", ostype)
+		os.Exit(1)
+	}
+	logger.Debug("OS validation successful")
+}
+
+func (s *SshFetcher) GetAllStats() {
+	if err := getHostname(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get hostname: %v", err)
+		return
+
+	}
+	if err := getUptime(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get uptime: %v", err)
+		return
+	}
+	if err := getLoad(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get load average: %v", err)
+		return
+	}
+	if err := getMemInfo(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get Mem metrics: %v", err)
+		return
+	}
+	if err := getFSInfo(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get FS metrics: %v", err)
+		return
+	}
+	if err := getInterfaces(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get interfaces: %v", err)
+		return
+	}
+	if err := getInterfaceInfo(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get interface info: %v", err)
+		return
+	}
+	if err := getCPU(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get cpu metrics: %v", err)
+		return
+	}
+	if err := getCgroups(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get vgroups: %v", err)
+		return
+	}
 }
 
 func getUptime(client *ssh.Client, stats *Stats) (err error) {
@@ -402,13 +467,14 @@ func findChildCgroups(parentPath string, client *ssh.Client) ([]string, error) {
 
 func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Client) error {
 	cgroup := &Cgroup{
-		Version:  "v2",
-		Path:     entry,
-		Children: []*Cgroup{},
+		Version: "v2",
+		Path:    entry,
+		Childs:  []*Cgroup{},
+		Parent:  parent,
 	}
 
 	if parent != nil {
-		parent.Children = append(parent.Children, cgroup)
+		parent.Childs = append(parent.Childs, cgroup)
 	}
 
 	data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
@@ -494,7 +560,7 @@ func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Clie
 
 	// If this is a root call (no parent), add to stats
 	if parent == nil {
-		stats.Cgroups = append(stats.Cgroups, *cgroup)
+		stats.Cgroups = append(stats.Cgroups, cgroup)
 	}
 
 	return nil
