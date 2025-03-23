@@ -141,44 +141,47 @@ func (s *SshFetcher) ValidateOS() {
 	logger.Debug("OS validation successful")
 }
 
-func (s *SshFetcher) GetAllStats() {
+func (s *SshFetcher) GetAllStats() []error {
+	var errors []error
+
 	if err := getHostname(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get hostname: %v", err)
-		return
+		errors = append(errors, err)
 
 	}
 	if err := getUptime(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get uptime: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getLoad(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get load average: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getMemInfo(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get Mem metrics: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getFSInfo(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get FS metrics: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getInterfaces(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get interfaces: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getInterfaceInfo(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get interface info: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getCPU(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get cpu metrics: %v", err)
-		return
+		errors = append(errors, err)
 	}
 	if err := getCgroups(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get vgroups: %v", err)
-		return
+		errors = append(errors, err)
 	}
+	return errors
 }
 
 func getUptime(client *ssh.Client, stats *Stats) (err error) {

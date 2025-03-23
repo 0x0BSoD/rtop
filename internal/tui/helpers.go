@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"github.com/0x0BSoD/rtop/internal/stats"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/table"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"time"
 )
@@ -119,4 +121,14 @@ func InitNetTable(m *Model) {
 	t.SetStyles(s)
 
 	m.netTable = t
+}
+
+func fetchStatsCmd(fetcher *stats.SshFetcher) tea.Cmd {
+	return func() tea.Msg {
+		err := fetcher.GetAllStats()
+		return statsMsg{
+			Stats: fetcher.Stats,
+			Errs:  err,
+		}
+	}
 }

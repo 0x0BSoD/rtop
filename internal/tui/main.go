@@ -15,9 +15,15 @@ import (
 
 type tickMsg time.Time
 
+type statsMsg struct {
+	Stats *stats.Stats
+	Errs  []error
+}
+
 type Model struct {
 	UpdateInterval time.Duration
 	SshFetcher     *stats.SshFetcher
+	stats          *stats.Stats
 	width          int
 	height         int
 	Bars           map[string]progress.Model
@@ -38,31 +44,33 @@ func (m Model) Init() tea.Cmd {
 	m.viewport.SetContent(m.viewMetrics())
 	tea.SetWindowTitle("rtop")
 
-	return tea.Tick(m.UpdateInterval, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
+	return tea.Batch(
+		fetchStatsCmd(m.SshFetcher),
+		tea.Tick(m.UpdateInterval, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		}),
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case statsMsg:
+		m.stats = msg.Stats
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
-
 		case key.Matches(msg, keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
 			}
-
 		case key.Matches(msg, keys.Down):
 			currentCgroup := m.getCurrentLevelCgroup()
 			if m.cursor < len(currentCgroup)-1 {
 				m.cursor++
 			}
-
 		case key.Matches(msg, keys.Left):
 			if len(m.path) > 0 {
 				lastIndex := len(m.path) - 1
@@ -77,7 +85,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-
 		case key.Matches(msg, keys.Right):
 			currentCgroup := m.getSelectedCgroup()
 			if currentCgroup != nil && len(currentCgroup.Childs) > 0 {
@@ -85,11 +92,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				currentCgroup.Open = true
 				m.cursor = 0
 			}
-
 		case key.Matches(msg, keys.Toggle):
 			m.cgroupView = !m.cgroupView
 		}
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -100,15 +105,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		resizeBars(m.Bars, m.width)
 
 		cmds = append(cmds, viewport.Sync(m.viewport))
-
 	case tickMsg:
-		m.SshFetcher.GetAllStats()
-		m.fsTable.Update(m)
-		m.netTable.Update(m)
+		var cmd tea.Cmd
+		m.fsTable, cmd = m.fsTable.Update(m)
+		cmds = append(cmds, cmd)
 
-		return m, tea.Tick(m.UpdateInterval, func(t time.Time) tea.Msg {
-			return tickMsg(t)
-		})
+		m.netTable, cmd = m.netTable.Update(m)
+		cmds = append(cmds, cmd)
+
+		if !m.cgroupView {
+			cmds = append(cmds, fetchStatsCmd(m.SshFetcher))
+		}
+
+		cmds = append(cmds,
+			tea.Tick(m.UpdateInterval, func(t time.Time) tea.Msg {
+				return tickMsg(t)
+			}),
+		)
 	}
 
 	if m.cgroupView {
