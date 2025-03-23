@@ -1,8 +1,8 @@
 /*
 
-rtop-bot - remote system monitoring bot
+rtop - the remote system monitoring utility
 
-Copyright (c) 2015 RapidLoop
+Copyright (c) 2015-17 RapidLoop
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-package main
+package stats
 
 import (
 	"bufio"
@@ -48,7 +48,7 @@ func (s *Section) clear() {
 	s.IdentityFile = ""
 }
 
-func (s *Section) getFull(name string, def Section) (host string, port int, user, keyfile string) {
+func (s *Section) getFull(def Section) (host string, port int, user, keyfile string) {
 	if len(s.Hostname) > 0 {
 		host = s.Hostname
 	} else if len(def.Hostname) > 0 {
@@ -74,7 +74,7 @@ func (s *Section) getFull(name string, def Section) (host string, port int, user
 
 var HostInfo = make(map[string]Section)
 
-func getSshEntry(name string) (host string, port int, user, keyfile string) {
+func GetSshEntry(name string) (host string, port int, user, keyfile string) {
 
 	def := Section{Hostname: name}
 	if defcfg, ok := HostInfo["*"]; ok {
@@ -82,17 +82,17 @@ func getSshEntry(name string) (host string, port int, user, keyfile string) {
 	}
 
 	if s, ok := HostInfo[name]; ok {
-		return s.getFull(name, def)
+		return s.getFull(def)
 	}
 	for h, s := range HostInfo {
 		if ok, err := path.Match(h, name); ok && err == nil {
-			return s.getFull(name, def)
+			return s.getFull(def)
 		}
 	}
 	return def.Hostname, def.Port, def.User, def.IdentityFile
 }
 
-func parseSshConfig(path string) bool {
+func ParseSshConfig(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
 		log.Printf("warning: %v", err)
@@ -100,9 +100,9 @@ func parseSshConfig(path string) bool {
 	}
 	defer f.Close()
 	update := func(cb func(s *Section)) {}
-	s := bufio.NewScanner(f)
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
+	bScan := bufio.NewScanner(f)
+	for bScan.Scan() {
+		line := strings.TrimSpace(bScan.Text())
 		if len(line) == 0 || line[0] == '#' {
 			continue
 		}

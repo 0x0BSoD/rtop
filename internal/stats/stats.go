@@ -23,15 +23,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-package main
+package stats
 
 import (
 	"bufio"
+	"fmt"
 	"golang.org/x/crypto/ssh"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/0x0BSoD/rtop/pkg/logger"
 )
+
+type Cgroup struct {
+	Version            string
+	Path               string
+	CpuUsage           float64
+	MemoryUsageCurrent int
+	MemoryUsageLimit   int
+	IoReadBytes        int
+	IoWriteBytes       int
+	Open               bool
+	Childs             []*Cgroup
+	Parent             *Cgroup
+}
 
 type FSInfo struct {
 	Device     string
@@ -89,17 +106,82 @@ type Stats struct {
 	FSInfos      []FSInfo
 	NetIntf      map[string]NetIntfInfo
 	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
+	Cgroups      []*Cgroup
 }
 
-func getAllStats(client *ssh.Client, stats *Stats) {
-	getUptime(client, stats)
-	getHostname(client, stats)
-	getLoad(client, stats)
-	getMemInfo(client, stats)
-	getFSInfo(client, stats)
-	getInterfaces(client, stats)
-	getInterfaceInfo(client, stats)
-	getCPU(client, stats)
+type SshFetcher struct {
+	Client *ssh.Client
+	Logger *logger.Logger
+	Stats  *Stats
+}
+
+func NewSshFetcher(client *ssh.Client) *SshFetcher {
+	return &SshFetcher{
+		Client: client,
+		Stats:  &Stats{},
+	}
+}
+
+// ValidateOS - rtop only support for Linux system
+func (s *SshFetcher) ValidateOS() {
+	logger.Debug("Validating remote OS type")
+	ostype, err := runCommand(s.Client, "uname")
+	if err != nil {
+		logger.Fatal("Failed to get OS type: %v", err)
+		os.Exit(1)
+	}
+	//remove newline character
+	ostype = strings.Trim(ostype, "\n")
+
+	logger.Info("Remote OS detected: %s", ostype)
+	if !strings.EqualFold(ostype, "Linux") {
+		logger.Fatal("rtop not supported for %s system", ostype)
+		os.Exit(1)
+	}
+	logger.Debug("OS validation successful")
+}
+
+func (s *SshFetcher) GetAllStats() []error {
+	var errors []error
+
+	if err := getHostname(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get hostname: %v", err)
+		errors = append(errors, err)
+
+	}
+	if err := getUptime(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get uptime: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getLoad(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get load average: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getMemInfo(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get Mem metrics: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getFSInfo(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get FS metrics: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getInterfaces(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get interfaces: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getInterfaceInfo(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get interface info: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getCPU(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get cpu metrics: %v", err)
+		errors = append(errors, err)
+	}
+	if err := getCgroups(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get vgroups: %v", err)
+		errors = append(errors, err)
+	}
+	return errors
 }
 
 func getUptime(client *ssh.Client, stats *Stats) (err error) {
@@ -339,10 +421,10 @@ func parseCPUFields(fields []string, stat *cpuRaw) {
 // the CPU stats that were fetched last time round
 var preCPU cpuRaw
 
-func getCPU(client *ssh.Client, stats *Stats) (err error) {
+func getCPU(client *ssh.Client, stats *Stats) error {
 	lines, err := runCommand(client, "/bin/cat /proc/stat")
 	if err != nil {
-		return
+		return err
 	}
 
 	var (
@@ -374,5 +456,152 @@ func getCPU(client *ssh.Client, stats *Stats) (err error) {
 	stats.CPU.Guest = float32(nowCPU.Guest-preCPU.Guest) / total * 100
 END:
 	preCPU = nowCPU
-	return
+	return err
+}
+
+func findChildCgroups(parentPath string, client *ssh.Client) ([]string, error) {
+	data, err := runCommand(client, fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 -type d | grep slice$", parentPath))
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.Split(strings.TrimSpace(data), "\n"), nil
+}
+
+func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Client) error {
+	cgroup := &Cgroup{
+		Version: "v2",
+		Path:    entry,
+		Childs:  []*Cgroup{},
+		Parent:  parent,
+	}
+
+	if parent != nil {
+		parent.Childs = append(parent.Childs, cgroup)
+	}
+
+	data, err := runCommand(client, fmt.Sprintf("cat %s/cpu.stat", entry))
+	if err != nil {
+		return err
+	}
+
+	rawCpuStats := strings.Split(strings.TrimSpace(data), "\n")
+	cpuStat := make(map[string]float64, len(rawCpuStats))
+	for _, line := range rawCpuStats {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			cpuStat[fields[0]], err = strconv.ParseFloat(fields[1], 64)
+			if err != nil {
+				continue
+			}
+		}
+	}
+	cgroup.CpuUsage = cpuStat["usage_usec"] / 1000000.00
+
+	data, err = runCommand(client, fmt.Sprintf("cat %s/memory.current", entry))
+	if err != nil {
+		return err
+	}
+	cgroup.MemoryUsageCurrent, _ = strconv.Atoi(strings.TrimSpace(data))
+
+	data, err = runCommand(client, fmt.Sprintf("cat %s/memory.max", entry))
+	if err != nil {
+		return err
+	}
+	cgroup.MemoryUsageLimit, _ = strconv.Atoi(strings.TrimSpace(data))
+
+	data, err = runCommand(client, fmt.Sprintf("cat %s/io.stat", entry))
+	if err != nil {
+		return err
+	}
+	rawIoStats := strings.Split(strings.TrimSpace(data), "\n")
+
+	ioStat := make(map[string]map[string]int, len(rawIoStats))
+	var mapKey string
+	for _, line := range rawIoStats {
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			for _, i := range fields {
+				if strings.Contains(i, ":") {
+					mapKey = fields[0]
+					ioStat[mapKey] = make(map[string]int)
+				}
+				if mapKey != "" && mapKey != i {
+					spltData := strings.Split(i, "=")
+					if len(spltData) == 2 {
+						stat, _ := strconv.Atoi(spltData[1])
+						ioStat[mapKey][spltData[0]] = stat
+					}
+				}
+			}
+		}
+	}
+
+	ioRead := 0
+	ioWrite := 0
+	for _, device := range ioStat {
+		ioRead += device["rbytes"]
+		ioWrite += device["wbytes"]
+	}
+
+	cgroup.IoReadBytes = ioRead
+	cgroup.IoWriteBytes = ioWrite
+
+	childDirs, err := findChildCgroups(entry, client)
+	if err != nil {
+		return err
+	}
+
+	// Recursively process each child
+	for _, childDir := range childDirs {
+		err = getCgroupsData(childDir, cgroup, stats, client)
+		if err != nil {
+			// Handle error or continue with next child
+			continue
+		}
+	}
+
+	// If this is a root call (no parent), add to stats
+	if parent == nil {
+		stats.Cgroups = append(stats.Cgroups, cgroup)
+	}
+
+	return nil
+}
+
+func getCgroups(client *ssh.Client, stats *Stats) error {
+	//cgroupVersion := "v1"
+
+	cgroupPath := "/sys/fs/cgroup"
+
+	// Check if cgroups v2 is being used
+	//isV2, err := runCommand(client,
+	//	fmt.Sprintf("if [ -f %s ];then echo -n 'True'; fi", filepath.Join(cgroupPath, "cgroup.controllers")))
+	//if err != nil {
+	//	return err
+	//}
+
+	//if strings.TrimSpace(isV2) == "True" {
+	//	cgroupVersion = "v2"
+	//}
+
+	// Get all top-level cgroups
+	entries, err := runCommand(client, fmt.Sprintf("find %s -maxdepth 1 -type d | grep \"^%s/.*\\.slice$\"", cgroupPath, cgroupPath))
+	if err != nil {
+		return err
+	}
+	cgroups := strings.Split(strings.TrimSpace(entries), "\n")
+
+	// Reset slice
+	stats.Cgroups = nil
+
+	// TODO: Add v1 support
+	for _, entry := range cgroups {
+		err := getCgroupsData(entry, nil, stats, client)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

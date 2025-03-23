@@ -1,4 +1,4 @@
-package main
+package logger
 
 import (
 	"fmt"
@@ -31,7 +31,7 @@ type Logger struct {
 }
 
 // Global logger instance
-var rtopLogger *Logger
+var RtopLogger *Logger
 
 // InitLogging initializes the logging system
 func InitLogging(logLevel string, logToConsole bool, logFilePath string) {
@@ -92,7 +92,7 @@ func InitLogging(logLevel string, logToConsole bool, logFilePath string) {
 
 	logger := log.New(writer, "rtop: ", log.LstdFlags|log.Lmicroseconds)
 
-	rtopLogger = &Logger{
+	RtopLogger = &Logger{
 		level:     level,
 		logFile:   logFile,
 		logger:    logger,
@@ -100,7 +100,7 @@ func InitLogging(logLevel string, logToConsole bool, logFilePath string) {
 		logToFile: logToFile,
 	}
 
-	rtopLogger.Info("Logging initialized at level: %s", logLevel)
+	RtopLogger.Info("Logging initialized at level: %s", logLevel)
 }
 
 // Close closes any resources used by the logger
@@ -189,36 +189,36 @@ func (l *Logger) LogStats(hostname string, load1 string, memUsedPercent float64,
 
 // Debug convenience function for global logger
 func Debug(format string, v ...interface{}) {
-	if rtopLogger != nil {
-		rtopLogger.Debug(format, v...)
+	if RtopLogger != nil {
+		RtopLogger.Debug(format, v...)
 	}
 }
 
 // Info convenience function for global logger
 func Info(format string, v ...interface{}) {
-	if rtopLogger != nil {
-		rtopLogger.Info(format, v...)
+	if RtopLogger != nil {
+		RtopLogger.Info(format, v...)
 	}
 }
 
 // Warn convenience function for global logger
 func Warn(format string, v ...interface{}) {
-	if rtopLogger != nil {
-		rtopLogger.Warn(format, v...)
+	if RtopLogger != nil {
+		RtopLogger.Warn(format, v...)
 	}
 }
 
 // Error convenience function for global logger
 func Error(format string, v ...interface{}) {
-	if rtopLogger != nil {
-		rtopLogger.Error(format, v...)
+	if RtopLogger != nil {
+		RtopLogger.Error(format, v...)
 	}
 }
 
 // Fatal convenience function for global logger
 func Fatal(format string, v ...interface{}) {
-	if rtopLogger != nil {
-		rtopLogger.Fatal(format, v...)
+	if RtopLogger != nil {
+		RtopLogger.Fatal(format, v...)
 	} else {
 		// Ensure we exit even if logger is not initialized
 		fmt.Fprintf(os.Stderr, "FATAL: "+format+"\n", v...)
