@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -570,20 +571,19 @@ func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Clie
 }
 
 func getCgroups(client *ssh.Client, stats *Stats) error {
-	//cgroupVersion := "v1"
-
 	cgroupPath := "/sys/fs/cgroup"
 
-	// Check if cgroups v2 is being used
-	//isV2, err := runCommand(client,
-	//	fmt.Sprintf("if [ -f %s ];then echo -n 'True'; fi", filepath.Join(cgroupPath, "cgroup.controllers")))
-	//if err != nil {
-	//	return err
-	//}
+	//Check if cgroups v2 is being used
+	isV2, err := runCommand(client,
+		fmt.Sprintf("if [ -f %s ];then echo -n 'True'; fi", filepath.Join(cgroupPath, "cgroup.controllers")))
+	if err != nil {
+		return err
+	}
 
-	//if strings.TrimSpace(isV2) == "True" {
-	//	cgroupVersion = "v2"
-	//}
+	// TODO: Add v1 support
+	if strings.TrimSpace(isV2) != "True" {
+		return nil
+	}
 
 	// Get all top-level cgroups
 	entries, err := runCommand(client, fmt.Sprintf("find %s -maxdepth 1 -type d | grep \"^%s/.*\\.slice$\"", cgroupPath, cgroupPath))
@@ -595,7 +595,6 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 	// Reset slice
 	stats.Cgroups = nil
 
-	// TODO: Add v1 support
 	for _, entry := range cgroups {
 		err := getCgroupsData(entry, nil, stats, client)
 		if err != nil {
