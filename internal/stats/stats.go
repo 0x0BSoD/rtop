@@ -27,6 +27,7 @@ package stats
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"os"
@@ -90,6 +91,14 @@ type CPUInfo struct {
 	Guest   float32
 }
 
+type Proc struct {
+	Pid        string
+	CpuPercent string
+	MemPercent string
+	User       string
+	Command    string
+}
+
 type Stats struct {
 	Uptime       time.Duration
 	Hostname     string
@@ -108,6 +117,7 @@ type Stats struct {
 	NetIntf      map[string]NetIntfInfo
 	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
 	Cgroups      []*Cgroup
+	Procs        map[int]*Proc
 }
 
 type SshFetcher struct {
@@ -143,52 +153,86 @@ func (s *SshFetcher) ValidateOS() {
 }
 
 func (s *SshFetcher) GetAllStats() []error {
-	var errors []error
+	var _errors []error
 
 	if err := getHostname(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get hostname: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 
 	}
 	if err := getUptime(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get uptime: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
 	if err := getLoad(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get load average: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
 	if err := getMemInfo(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get Mem metrics: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
 	if err := getFSInfo(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get FS metrics: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
 	if err := getInterfaces(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get interfaces: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
 	if err := getInterfaceInfo(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get interface info: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
 	if err := getCPU(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get cpu metrics: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
+	}
+	if err := getTopProcs(s.Client, s.Stats); err != nil {
+		logger.Fatal("Failed to get top procs: %v", err)
+		_errors = append(_errors, err)
 	}
 	if err := getCgroups(s.Client, s.Stats); err != nil {
 		logger.Fatal("Failed to get vgroups: %v", err)
-		errors = append(errors, err)
+		_errors = append(_errors, err)
 	}
-	return errors
+	return _errors
 }
 
-func getUptime(client *ssh.Client, stats *Stats) (err error) {
+func getTopProcs(client *ssh.Client, stats *Stats) error {
+	procData, err := runCommand(client, "/bin/ps -eo pid,pcpu,pmem,user,args --sort=-pcpu | head -n 11")
+	if err != nil {
+		return err
+	}
+
+	if len(procData) <= 0 {
+		return errors.New("no process data found")
+	}
+
+	topProcs := make(map[int]*Proc, 10)
+	for num, line := range strings.Split(procData, "\n")[1:] {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		topProcs[num] = &Proc{
+			Pid:        f[0],
+			CpuPercent: f[1],
+			MemPercent: f[2],
+			User:       f[3],
+			Command:    strings.Join(f[4:], " "),
+		}
+
+	}
+	stats.Procs = topProcs
+
+	return nil
+}
+
+func getUptime(client *ssh.Client, stats *Stats) error {
 	uptime, err := runCommand(client, "/bin/cat /proc/uptime")
 	if err != nil {
-		return
+		return err
 	}
 
 	parts := strings.Fields(uptime)
@@ -196,12 +240,12 @@ func getUptime(client *ssh.Client, stats *Stats) (err error) {
 		var upsecs float64
 		upsecs, err = strconv.ParseFloat(parts[0], 64)
 		if err != nil {
-			return
+			return err
 		}
 		stats.Uptime = time.Duration(upsecs * 1e9)
 	}
 
-	return
+	return err
 }
 
 func getHostname(client *ssh.Client, stats *Stats) (err error) {
@@ -233,13 +277,13 @@ func getLoad(client *ssh.Client, stats *Stats) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func getMemInfo(client *ssh.Client, stats *Stats) (err error) {
+func getMemInfo(client *ssh.Client, stats *Stats) error {
 	lines, err := runCommand(client, "/bin/cat /proc/meminfo")
 	if err != nil {
-		return
+		return err
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(lines))
@@ -269,13 +313,13 @@ func getMemInfo(client *ssh.Client, stats *Stats) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func getFSInfo(client *ssh.Client, stats *Stats) (err error) {
+func getFSInfo(client *ssh.Client, stats *Stats) error {
 	lines, err := runCommand(client, "/bin/df -PB1")
 	if err != nil {
-		return
+		return err
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(lines))
@@ -304,17 +348,17 @@ func getFSInfo(client *ssh.Client, stats *Stats) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
-func getInterfaces(client *ssh.Client, stats *Stats) (err error) {
+func getInterfaces(client *ssh.Client, stats *Stats) error {
 	var lines string
-	lines, err = runCommand(client, "/bin/ip -o addr")
+	lines, err := runCommand(client, "/bin/ip -o addr")
 	if err != nil {
 		// try /sbin/ip
 		lines, err = runCommand(client, "/sbin/ip -o addr")
 		if err != nil {
-			return
+			return err
 		}
 	}
 
@@ -348,7 +392,7 @@ func getInterfaces(client *ssh.Client, stats *Stats) (err error) {
 		}
 	}
 
-	return
+	return nil
 }
 
 func getInterfaceInfo(client *ssh.Client, stats *Stats) (err error) {

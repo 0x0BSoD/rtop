@@ -26,6 +26,28 @@ func (m Model) getSelectedCgroup() *stats.Cgroup {
 
 func (m Model) viewCgroups() string {
 	var sb strings.Builder
+
+	// TODO: For now I'll add proc info to cGroups view
+	sb.WriteString(titleStyle.Render(" Top 10 Processes by CPU usage"))
+	sb.WriteString("\n\n")
+	for i := 0; i < len(m.stats.Procs); i++ {
+		cmd := m.stats.Procs[i].Command
+		if len(cmd) > 100 {
+			cmd = cmd[:100] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("%d) %s %s, %s %s, %s %s, %s >\n%s\n",
+			i+1,
+			keywordStyle.Render("PID"),
+			m.stats.Procs[i].Pid,
+			keywordStyle.Render("CPU"),
+			m.stats.Procs[i].CpuPercent,
+			keywordStyle.Render("MEM"),
+			m.stats.Procs[i].MemPercent,
+			keywordStyle.Render("CMD"),
+			cmd))
+	}
+
+	sb.WriteString("\n\n")
 	cgroup := m.getCurrentLevelCgroup()
 
 	// Show current path
@@ -34,10 +56,10 @@ func (m Model) viewCgroups() string {
 		for i, cgroup := range m.path {
 			path[i] = cgroup.Path
 		}
-		sb.WriteString(titleStyle.Render(" Path: " + strings.Join(path, " > ") + " "))
+		sb.WriteString(titleStyle.Render("Cgroup Path: " + strings.Join(path, " > ") + " "))
 		sb.WriteString("\n\n")
 	} else {
-		sb.WriteString(titleStyle.Render(" Root "))
+		sb.WriteString(titleStyle.Render("Cgroup Root "))
 		sb.WriteString("\n\n")
 	}
 
