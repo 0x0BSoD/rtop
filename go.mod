@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/mattn/go-colorable v0.1.14
+	github.com/muesli/reflow v0.3.0
 	golang.org/x/crypto v0.35.0
 )
 

@@ -263,7 +263,6 @@ func main() {
 	logger.Info("Successfully connected to %s", addr)
 
 	sshFetcher := stats.NewSshFetcher(client)
-
 	sshFetcher.ValidateOS()
 
 	logger.Info("Starting monitoring loop with refresh interval of %v", interval)

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -20,6 +21,14 @@ type statsMsg struct {
 	Errs  []error
 }
 
+type Viewports int
+
+const (
+	ViewportStats Viewports = iota
+	ViewportCgroups
+	ViewportProcesses
+)
+
 type Model struct {
 	UpdateInterval time.Duration
 	SshFetcher     *stats.SshFetcher
@@ -34,6 +43,7 @@ type Model struct {
 	selected       *stats.Cgroup
 	cgroupView     bool
 	cursor         int
+	focused        Viewports
 }
 
 func (m Model) Init() tea.Cmd {
@@ -94,6 +104,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Toggle):
 			m.cgroupView = !m.cgroupView
+		case key.Matches(msg, keys.Tab):
+			if m.focused == ViewportProcesses {
+				m.focused = ViewportStats
+				break
+			}
+			m.focused++
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -125,7 +141,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.cgroupView {
-		m.viewport.SetContent(m.viewCgroups())
+		m.viewport.SetContent(
+			bigGroupStyle.Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					m.viewProcesses(),
+					m.viewCgroups(),
+				),
+			),
+		)
 	} else {
 		m.viewport.SetContent(m.viewMetrics())
 	}
@@ -135,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	help := helpStyle.Render("↑/↓: Navigate  ←/→: Back/Enter  c: Toggle  q: Quit")
+	help := helpStyle.Render("↑/↓: Navigate  ←/→: Back/Enter  c: Toggle tab: Toggle focus  q: Quit")
 
 	return fmt.Sprintf("%s\n%s", m.viewport.View(), help)
 }

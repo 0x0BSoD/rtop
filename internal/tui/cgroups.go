@@ -26,30 +26,13 @@ func (m Model) getSelectedCgroup() *stats.Cgroup {
 
 func (m Model) viewCgroups() string {
 	var sb strings.Builder
-
-	// TODO: For now I'll add proc info to cGroups view
-	sb.WriteString(titleStyle.Render(" Top 10 Processes by CPU usage"))
-	sb.WriteString("\n\n")
-	for i := 0; i < len(m.stats.Procs); i++ {
-		cmd := m.stats.Procs[i].Command
-		if len(cmd) > 100 {
-			cmd = cmd[:100] + "..."
-		}
-		sb.WriteString(fmt.Sprintf("%d) %s %s, %s %s, %s %s, %s >\n%s\n",
-			i+1,
-			keywordStyle.Render("PID"),
-			m.stats.Procs[i].Pid,
-			keywordStyle.Render("CPU"),
-			m.stats.Procs[i].CpuPercent,
-			keywordStyle.Render("MEM"),
-			m.stats.Procs[i].MemPercent,
-			keywordStyle.Render("CMD"),
-			cmd))
+	cgroup := m.getCurrentLevelCgroup()
+	if len(cgroup) == 0 {
+		sb.WriteString(titleStyle.Render("cgroup data is not available"))
+		return sb.String()
 	}
 
-	sb.WriteString("\n\n")
-	cgroup := m.getCurrentLevelCgroup()
-
+	sb.WriteString(fmt.Sprintf("Focused: %d\n", m.focused))
 	// Show current path
 	if len(m.path) > 0 {
 		path := make([]string, len(m.path))
