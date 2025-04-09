@@ -60,6 +60,7 @@ func runCommand(client *ssh.Client, command string) (string, error) {
 		return "", fmt.Errorf("failed to create SSH session: %w", err)
 	}
 	defer session.Close()
+
 	logger.Debug("SSH session created successfully")
 
 	logger.Debug("Executing command: %s", command)

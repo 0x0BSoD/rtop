@@ -9,6 +9,7 @@ type keyMap struct {
 	Right  key.Binding
 	Toggle key.Binding
 	Tab    key.Binding
+	Space  key.Binding
 	Quit   key.Binding
 }
 
@@ -36,6 +37,10 @@ var keys = keyMap{
 	Tab: key.NewBinding(
 		key.WithKeys("tab"),
 		key.WithHelp("tab", "change focus"),
+	),
+	Space: key.NewBinding(
+		key.WithKeys(" "),
+		key.WithHelp(" ", "unfold"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q", "ctrl+c"),

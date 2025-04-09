@@ -30,7 +30,6 @@ import (
 	"github.com/0x0BSoD/rtop/internal/stats"
 	"github.com/0x0BSoD/rtop/internal/tui"
 	"github.com/0x0BSoD/rtop/pkg/logger"
-	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"log"
 	"os"
@@ -267,27 +266,24 @@ func main() {
 
 	logger.Info("Starting monitoring loop with refresh interval of %v", interval)
 
-	// Initialize progress bars
-	progressBars := make(map[string]progress.Model, 10)
-	progressBars["total"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["system"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["user"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["idle"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["irq"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["softIrq"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["iowait"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["guest"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["nice"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
-	progressBars["steal"] = progress.New(progress.WithScaledGradient("#FF7CCB", "#FDFF8C"))
+	m := tui.NewModel(interval, sshFetcher)
 
-	m := tui.Model{
-		SshFetcher:     sshFetcher,
-		UpdateInterval: interval,
-		Bars:           progressBars,
-	}
-	sshFetcher.GetAllStats()
-	tui.InitFsTable(&m)
-	tui.InitNetTable(&m)
+	//fmt.Println(m.SshFetcher.Stats.NetIntf)
+	//fmt.Println(m.SshFetcher.Stats.CPU)
+	//fmt.Println(m.SshFetcher.Stats.Hostname)
+	//fmt.Println(m.SshFetcher.Stats.Uptime)
+	//fmt.Println(m.SshFetcher.Stats.MemFree)
+	//fmt.Println(m.SshFetcher.Stats.MemTotal)
+	//fmt.Println(m.SshFetcher.Stats.MemBuffers)
+	//fmt.Println(m.SshFetcher.Stats.MemCached)
+	//for _, i := range m.SshFetcher.Stats.Procs {
+	//	fmt.Println(i)
+	//}
+	//for _, i := range m.SshFetcher.Stats.Cgroups {
+	//	fmt.Println(i)
+	//}
+
+	tea.SetWindowTitle("rtop")
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)

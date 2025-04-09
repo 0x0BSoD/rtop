@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/charmbracelet/lipgloss"
 	"strings"
 
 	"github.com/0x0BSoD/rtop/internal/stats"
@@ -9,7 +10,7 @@ import (
 
 func (m Model) getCurrentLevelCgroup() []*stats.Cgroup {
 	if len(m.path) == 0 {
-		return m.SshFetcher.Stats.Cgroups
+		return m.Stats.Cgroups
 	}
 
 	currentParent := m.path[len(m.path)-1]
@@ -24,53 +25,110 @@ func (m Model) getSelectedCgroup() *stats.Cgroup {
 	return currentCgroup[m.cursor]
 }
 
-func (m Model) viewCgroups() string {
+func (m Model) viewCgroups(availableWidth int) string {
 	var sb strings.Builder
-	cgroup := m.getCurrentLevelCgroup()
-	if len(cgroup) == 0 {
-		sb.WriteString(titleStyle.Render("cgroup data is not available"))
-		return sb.String()
-	}
+	//viewportWidth := m.viewport.Width
 
-	sb.WriteString(fmt.Sprintf("Focused: %d\n", m.focused))
-	// Show current path
+	pathDisplay := ""
 	if len(m.path) > 0 {
-		path := make([]string, len(m.path))
+		pathSegments := make([]string, len(m.path))
 		for i, cgroup := range m.path {
-			path[i] = cgroup.Path
+			pathSegments[i] = cgroup.Path
 		}
-		sb.WriteString(titleStyle.Render("Cgroup Path: " + strings.Join(path, " > ") + " "))
-		sb.WriteString("\n\n")
+		pathDisplay = "Path: " + strings.Join(pathSegments, separatorStyle.Render(" > "))
 	} else {
-		sb.WriteString(titleStyle.Render("Cgroup Root "))
-		sb.WriteString("\n\n")
+		pathDisplay = "Cgroup Root"
 	}
+	sb.WriteString(pathStyle.Render(lipgloss.PlaceHorizontal(availableWidth, lipgloss.Left, titleStyle.Render(pathDisplay))))
+	sb.WriteString("\n\n")
 
-	for i, c := range cgroup {
-		prefix := "  "
-		style := inactiveStyle
-		if i == m.cursor {
-			prefix = "> "
-			style = activeStyle
+	currentLevelCgroups := m.getCurrentLevelCgroup()
+	if len(currentLevelCgroups) == 0 {
+		if len(m.path) > 0 {
+			sb.WriteString(inactiveStyle.Render("  (No children in this cgroup)"))
+		} else {
+			sb.WriteString(errorStyle.Render("No cgroup data available at root"))
 		}
-
-		CgroupInfo := fmt.Sprintf("%s%s", prefix, c.Path)
-		sb.WriteString(style.Render(CgroupInfo))
 		sb.WriteString("\n")
 	}
 
-	// Show details of selected Cgroup
-	sb.WriteString("\n")
-	selectedCgroup := m.getSelectedCgroup()
-	if selectedCgroup != nil {
-		memLimit := formatBytes(uint64(selectedCgroup.MemoryUsageLimit))
-		if selectedCgroup.MemoryUsageLimit == 0 {
-			memLimit = "∞"
+	for i, c := range currentLevelCgroups {
+		rowStyle := inactiveStyle
+		cursor := " "
+		if m.focused == ViewportCgroups && i == m.cursor {
+			rowStyle = activeStyle
+			cursor = ">"
 		}
-		sb.WriteString(fmt.Sprintf("CPU: %.2f seconds\n", selectedCgroup.CpuUsage))
-		sb.WriteString(fmt.Sprintf("Memory: %s / %s\n", formatBytes(uint64(selectedCgroup.MemoryUsageCurrent)), memLimit))
-		sb.WriteString(fmt.Sprintf("IO: Read %s Write %s\n", formatBytes(uint64(selectedCgroup.IoReadBytes)), formatBytes(uint64(selectedCgroup.IoWriteBytes))))
-		sb.WriteString(fmt.Sprintf("Children: %d\n", len(selectedCgroup.Childs)))
+
+		indicator := "  "
+		if len(c.Childs) > 0 {
+			indicator = listIndicatorStyle.Render("▸ ")
+		}
+
+		cgroupListItem := fmt.Sprintf("%s%s%s", cursor, indicator, c.Path)
+
+		renderedLine := lipgloss.NewStyle().MaxWidth(availableWidth).Render(rowStyle.Render(cgroupListItem))
+		sb.WriteString(renderedLine)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(borderStyle.Width(availableWidth).Render(""))
+
+	selectedCgroup := m.getSelectedCgroup()
+	if m.focused == ViewportCgroups && selectedCgroup != nil {
+		detailsContent := ""
+		memLimitStr := formatBytes(uint64(selectedCgroup.MemoryUsageLimit))
+		if selectedCgroup.MemoryUsageLimit == 0 {
+			memLimitStr = "Unlimited"
+		}
+
+		detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+			detailsLabelStyle.Render("CPU Time:"),
+			detailsValueStyle.Render(fmt.Sprintf("%.2f s", selectedCgroup.CpuUsage)),
+		) + "\n"
+
+		detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+			detailsLabelStyle.Render("Memory:"),
+			detailsValueStyle.Render(fmt.Sprintf("%s / %s", formatBytes(uint64(selectedCgroup.MemoryUsageCurrent)), memLimitStr)),
+		) + "\n"
+
+		if selectedCgroup.MemoryUsageLimit > 0 && selectedCgroup.MemoryUsageLimit >= selectedCgroup.MemoryUsageCurrent {
+			memPercent := float64(selectedCgroup.MemoryUsageCurrent) / float64(selectedCgroup.MemoryUsageLimit)
+			barWidth := 20
+			filledWidth := int(memPercent * float64(barWidth))
+			emptyWidth := barWidth - filledWidth
+			memBar := "[" + strings.Repeat("#", filledWidth) + strings.Repeat("-", emptyWidth) + "]"
+			detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+				detailsLabelStyle.Render("Mem Usage:"),
+				detailsValueStyle.Render(memBar),
+			) + "\n"
+		}
+
+		detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+			detailsLabelStyle.Render("IO Read:"),
+			detailsValueStyle.Render(formatBytes(uint64(selectedCgroup.IoReadBytes))),
+		) + "\n"
+
+		detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+			detailsLabelStyle.Render("IO Write:"),
+			detailsValueStyle.Render(formatBytes(uint64(selectedCgroup.IoWriteBytes))),
+		) + "\n"
+
+		detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+			detailsLabelStyle.Render("Children:"),
+			detailsValueStyle.Render(fmt.Sprintf("%d", len(selectedCgroup.Childs))),
+		)
+
+		detailsTitle := fmt.Sprintf("Details: %s", selectedCgroup.Path)
+		sb.WriteString(detailsBoxStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				titleStyle.Render(detailsTitle),
+				detailsContent,
+			),
+		))
+
+	} else {
+		sb.WriteString(inactiveStyle.Render("Select a cgroup to view details."))
 	}
 
 	return sb.String()

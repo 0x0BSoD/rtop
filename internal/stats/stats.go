@@ -120,6 +120,7 @@ type Stats struct {
 	Procs        map[int]*Proc
 }
 
+// TODO: Seems Stats is redundant
 type SshFetcher struct {
 	Client *ssh.Client
 	Logger *logger.Logger
