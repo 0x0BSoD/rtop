@@ -7,9 +7,6 @@ import (
 	"strings"
 )
 
-// Max length to show when a line is folded
-const foldedLength = 60
-
 func (m Model) viewProcesses(availableWidth int) string {
 	var sb strings.Builder
 
@@ -63,12 +60,14 @@ func (m Model) viewProcesses(availableWidth int) string {
 		displayCmd := process.Command
 
 		if isFolded {
+			// Max length to show when a line is folded
+			foldedLength := m.width - 20
 			if len(displayCmd) > foldedLength {
 				displayCmd = displayCmd[:foldedLength] + "..."
 			}
 			commandLines = append(commandLines, indentation+displayCmd)
 		} else {
-			wrappedCmd := wordwrap.String(displayCmd, availableWidth-10)
+			wrappedCmd := wordwrap.String(displayCmd, availableWidth-50)
 			lines := strings.Split(wrappedCmd, "\n")
 			for _, line := range lines {
 				commandLines = append(commandLines, indentation+line)

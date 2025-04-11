@@ -114,6 +114,17 @@ func (m Model) viewCgroups(availableWidth int) string {
 			detailsValueStyle.Render(formatBytes(uint64(selectedCgroup.IoWriteBytes))),
 		) + "\n"
 
+		if len(selectedCgroup.Containers) > 0 {
+			containers := ""
+			for _, c := range selectedCgroup.Containers {
+				containers += detailsValueStyle.Render(c) + "\n"
+			}
+			detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
+				detailsLabelStyle.Render("Containers: "),
+				containers,
+			) + "\n"
+		}
+
 		detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
 			detailsLabelStyle.Render("Children:"),
 			detailsValueStyle.Render(fmt.Sprintf("%d", len(selectedCgroup.Childs))),

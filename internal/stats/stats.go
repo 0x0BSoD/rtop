@@ -49,6 +49,7 @@ type Cgroup struct {
 	IoWriteBytes       int
 	Open               bool
 	Childs             []*Cgroup
+	Containers         []string
 	Parent             *Cgroup
 }
 
@@ -100,24 +101,25 @@ type Proc struct {
 }
 
 type Stats struct {
-	Uptime       time.Duration
-	Hostname     string
-	Load1        string
-	Load5        string
-	Load10       string
-	RunningProcs string
-	TotalProcs   string
-	MemTotal     uint64
-	MemFree      uint64
-	MemBuffers   uint64
-	MemCached    uint64
-	SwapTotal    uint64
-	SwapFree     uint64
-	FSInfos      []FSInfo
-	NetIntf      map[string]NetIntfInfo
-	CPU          CPUInfo // or []CPUInfo to get all the cpu-core's stats?
-	Cgroups      []*Cgroup
-	Procs        map[int]*Proc
+	Uptime        time.Duration
+	Hostname      string
+	Load1         string
+	Load5         string
+	Load10        string
+	RunningProcs  string
+	TotalProcs    string
+	MemTotal      uint64
+	MemFree       uint64
+	MemBuffers    uint64
+	MemCached     uint64
+	SwapTotal     uint64
+	SwapFree      uint64
+	FSInfos       []FSInfo
+	NetIntf       map[string]NetIntfInfo
+	CPU           CPUInfo // or []CPUInfo to get all the cpu-core's stats?
+	Cgroups       []*Cgroup
+	ContainerTool string
+	Procs         map[int]*Proc
 }
 
 // TODO: Seems Stats is redundant
@@ -151,6 +153,15 @@ func (s *SshFetcher) ValidateOS() {
 		os.Exit(1)
 	}
 	logger.Debug("OS validation successful")
+}
+
+func (s *SshFetcher) GetContainerTool() {
+	logger.Debug("Getting container tool")
+	cTool, err := runCommand(s.Client, "(command -v docker >/dev/null 2>&1 && echo docker) || (command -v crictl >/dev/null 2>&1 && echo crictl) || (command -v kubectl >/dev/null 2>&1 && echo kubectl)\n")
+	if err != nil {
+		logger.Fatal("Failed to get container tool: %v", err)
+	}
+	s.Stats.ContainerTool = cTool
 }
 
 func (s *SshFetcher) GetAllStats() []error {
@@ -514,6 +525,15 @@ func findChildCgroups(parentPath string, client *ssh.Client) ([]string, error) {
 	return strings.Split(strings.TrimSpace(data), "\n"), nil
 }
 
+func findDockerScope(parentPath string, client *ssh.Client) ([]string, error) {
+	data, err := runCommand(client, fmt.Sprintf("find %s -mindepth 1 -maxdepth 1 -type d | grep scope$", parentPath))
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.Split(strings.TrimSpace(data), "\n"), nil
+}
+
 func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Client) error {
 	cgroup := &Cgroup{
 		Version: "v2",
@@ -592,6 +612,11 @@ func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Clie
 
 	cgroup.IoReadBytes = ioRead
 	cgroup.IoWriteBytes = ioWrite
+
+	containers, err := findDockerScope(entry, client)
+	if err == nil {
+		cgroup.Containers = containers
+	}
 
 	childDirs, err := findChildCgroups(entry, client)
 	if err != nil {
