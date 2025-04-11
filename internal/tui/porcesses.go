@@ -68,7 +68,7 @@ func (m Model) viewProcesses(availableWidth int) string {
 			}
 			commandLines = append(commandLines, indentation+displayCmd)
 		} else {
-			wrappedCmd := wordwrap.String(displayCmd, availableWidth)
+			wrappedCmd := wordwrap.String(displayCmd, availableWidth-10)
 			lines := strings.Split(wrappedCmd, "\n")
 			for _, line := range lines {
 				commandLines = append(commandLines, indentation+line)
