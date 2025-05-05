@@ -160,11 +160,11 @@ func InitNetTable(m *Model) {
 	m.netTable = t
 }
 
-func drawFocused(myViewport, focused Viewports, width int, data string) string {
+func drawFocused(name string, myViewport, focused Viewports, width int, data string) string {
 	if myViewport == focused {
 		return bigGroupStyleFocused.Width(width).Render(data)
 	}
-	return data
+	return bigGroupStyle.Width(width).Render(titleStyle.Render(name))
 }
 
 //func drawFocused(myViewport, focused Viewports, width int, data string) string {

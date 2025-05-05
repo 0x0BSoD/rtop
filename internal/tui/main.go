@@ -160,8 +160,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.viewport.SetContent(
 			lipgloss.JoinVertical(lipgloss.Left,
-				drawFocused(ViewportProcesses, m.focused, focusWrapperWidth, processesContent),
-				drawFocused(ViewportCgroups, m.focused, focusWrapperWidth, cgroupsContent),
+				drawFocused("Top Processes by CPU", ViewportProcesses, m.focused, focusWrapperWidth, processesContent),
+				drawFocused("Cgroups", ViewportCgroups, m.focused, focusWrapperWidth, cgroupsContent),
 			),
 		)
 	} else {

@@ -49,6 +49,7 @@ type Cgroup struct {
 	IoWriteBytes       int
 	Open               bool
 	Childs             []*Cgroup
+	Scopes             []string
 	Containers         []string
 	Parent             *Cgroup
 }
@@ -161,7 +162,7 @@ func (s *SshFetcher) GetContainerTool() {
 	if err != nil {
 		logger.Fatal("Failed to get container tool: %v", err)
 	}
-	s.Stats.ContainerTool = cTool
+	s.Stats.ContainerTool = strings.TrimSpace(cTool)
 }
 
 func (s *SshFetcher) GetAllStats() []error {
@@ -534,6 +535,30 @@ func findDockerScope(parentPath string, client *ssh.Client) ([]string, error) {
 	return strings.Split(strings.TrimSpace(data), "\n"), nil
 }
 
+func getPodData(client *ssh.Client, stats *Stats) error {
+	for _, cgroup := range stats.Cgroups {
+		var containers []string
+		for _, scope := range cgroup.Scopes {
+			switch stats.ContainerTool {
+			case "docker":
+				data, err := runCommand(client,
+					fmt.Sprintf("sudo docker ps --filter=\"id=$(basename %s .scope | cut -d'-' -f2)\" --format=\"{{.Names}}\" 2>/dev/null", scope))
+				if err != nil {
+					return err
+				}
+				if len(data) > 0 {
+					containers = append(containers, strings.TrimSpace(data))
+				}
+			default:
+				continue
+			}
+		}
+		cgroup.Containers = containers
+	}
+
+	return nil
+}
+
 func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Client) error {
 	cgroup := &Cgroup{
 		Version: "v2",
@@ -613,9 +638,9 @@ func getCgroupsData(entry string, parent *Cgroup, stats *Stats, client *ssh.Clie
 	cgroup.IoReadBytes = ioRead
 	cgroup.IoWriteBytes = ioWrite
 
-	containers, err := findDockerScope(entry, client)
+	scope, err := findDockerScope(entry, client)
 	if err == nil {
-		cgroup.Containers = containers
+		cgroup.Scopes = scope
 	}
 
 	childDirs, err := findChildCgroups(entry, client)
@@ -670,6 +695,11 @@ func getCgroups(client *ssh.Client, stats *Stats) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	err = getPodData(client, stats)
+	if err != nil {
+		return err
 	}
 
 	return nil

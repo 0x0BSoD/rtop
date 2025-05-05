@@ -263,6 +263,7 @@ func main() {
 
 	sshFetcher := stats.NewSshFetcher(client)
 	sshFetcher.ValidateOS()
+	sshFetcher.GetContainerTool()
 
 	logger.Info("Starting monitoring loop with refresh interval of %v", interval)
 
@@ -276,11 +277,19 @@ func main() {
 	//fmt.Println(m.SshFetcher.Stats.MemTotal)
 	//fmt.Println(m.SshFetcher.Stats.MemBuffers)
 	//fmt.Println(m.SshFetcher.Stats.MemCached)
+	//fmt.Println(m.SshFetcher.Stats.ContainerTool)
+	//
+	//fmt.Println("\nProcs:")
 	//for _, i := range m.SshFetcher.Stats.Procs {
 	//	fmt.Println(i)
 	//}
-	//for _, i := range m.SshFetcher.Stats.Cgroups {
-	//	fmt.Println(i)
+	//
+	//fmt.Println("\nCgroups:")
+	//for _, cgroup := range m.SshFetcher.Stats.Cgroups {
+	//	fmt.Println(">", cgroup.Path)
+	//	for _, c := range cgroup.Containers {
+	//		fmt.Println("\t", c)
+	//	}
 	//}
 
 	tea.SetWindowTitle("rtop")

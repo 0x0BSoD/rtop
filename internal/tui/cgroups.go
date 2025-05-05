@@ -115,12 +115,12 @@ func (m Model) viewCgroups(availableWidth int) string {
 		) + "\n"
 
 		if len(selectedCgroup.Containers) > 0 {
-			containers := ""
+			var containers string
 			for _, c := range selectedCgroup.Containers {
-				containers += detailsValueStyle.Render(c) + "\n"
+				containers += " - " + detailsValueStyle.Render(c) + "\n"
 			}
-			detailsContent += lipgloss.JoinHorizontal(lipgloss.Left,
-				detailsLabelStyle.Render("Containers: "),
+			detailsContent += lipgloss.JoinVertical(lipgloss.Left,
+				detailsLabelStyle.Render("Containers"),
 				containers,
 			) + "\n"
 		}
